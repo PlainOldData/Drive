@@ -1,41 +1,42 @@
 #include <drive/sched.h>
+#include <assert.h>
 
 
 /* ---------------------------------------------------------------- Config -- */
 
 
-#ifndef DRV_SHED_MAX_THREADS
-#define DRV_SHED_MAX_THREADS 32
+#ifndef DRV_SCHED_MAX_THREADS
+#define DRV_SCHED_MAX_THREADS 32
 #endif
 
 
-#ifndef DRV_SHED_MAX_MARKERS
-#define DRV_SHED_MAX_MARKERS 512
+#ifndef DRV_SCHED_MAX_MARKERS
+#define DRV_SCHED_MAX_MARKERS 512
 #endif
 
 
-#ifndef DRV_SHED_MAX_PENDING_WORK
-#define DRV_SHED_MAX_PENDING_WORK 2048
+#ifndef DRV_SCHED_MAX_PENDING_WORK
+#define DRV_SCHED_MAX_PENDING_WORK 2048
 #endif
 
 
-#ifndef DRV_SHED_MAX_BLOCKED_WORK
-#define DRV_SHED_MAX_BLOCKED_WORK 2048
+#ifndef DRV_SCHED_MAX_BLOCKED_WORK
+#define DRV_SCHED_MAX_BLOCKED_WORK 2048
 #endif
 
 
-#ifndef DRV_SHED_MAX_FIBERS
-#define DRV_SHED_MAX_FIBERS 128
+#ifndef DRV_SCHED_MAX_FIBERS
+#define DRV_SCHED_MAX_FIBERS 128
 #endif
 
 
-#ifndef DRV_SHED_PCHECKS
-#define DRV_SHED_PCHECKS 1
+#ifndef DRV_SCHED_PCHECKS
+#define DRV_SCHED_PCHECKS 1
 #endif
 
 
-#ifndef DRV_SHED_LOGGING
-#define DRV_SHED_LOGGING 1
+#ifndef DRV_SCHED_LOGGING
+#define DRV_SCHED_LOGGING 1
 #endif
 
 
@@ -84,16 +85,36 @@ typedef HANDLE thread_t;
 #endif
 
 
-/* ---------------------------------------------------- Drive Shed Context -- */
+/* ---------------------------------------------------- Drive sched Context -- */
 
 
-struct drv_shed_ctx {
-        thread_t* threads[DRV_SHED_MAX_THREADS];
-        void* thread_ids[DRV_SHED_MAX_THREADS];
-        void* markers[DRV_SHED_MAX_MARKERS];
-        void* work[DRV_SHED_MAX_PENDING_WORK];
-        void* blocked[DRV_SHED_MAX_BLOCKED_WORK];
-        void* fibers[DRV_SHED_MAX_FIBERS];
+struct drv_marker {
+        int jobs_enqueued;
+        int jobs_pending;
+        uint32_t instance;
+};
+
+
+struct drv_work {
+        drv_task_fn *func;
+        void *arg;
+        int tid;
+        uint64_t this_maker;
+};
+
+
+struct drv_sched_ctx {
+        thread_t* threads[DRV_SCHED_MAX_THREADS];
+        void* thread_ids[DRV_SCHED_MAX_THREADS];
+        
+        void* work[DRV_SCHED_MAX_PENDING_WORK];
+        
+        struct drv_marker markers[DRV_SCHED_MAX_MARKERS];
+        uint32_t marker_instance;
+        
+        void* blocked[DRV_SCHED_MAX_BLOCKED_WORK];
+        void* fibers[DRV_SCHED_MAX_FIBERS];
+
 
         drv_log_fn log_fn;
 };
@@ -106,7 +127,7 @@ void
 drv_fiber_proc(
         void *arg)
 {
-
+        (void)arg;
 }
 
 
@@ -114,41 +135,42 @@ void
 drv_thread_proc(
         void *arg)
 {
-
+        (void)arg;
 }
 
 
-drv_shed_result
-drv_shed_ctx_create(
-        const struct drv_shed_ctx_create_desc *desc,
-        struct drv_shed_ctx **out)
+drv_sched_result
+drv_sched_ctx_create(
+        const struct drv_sched_ctx_create_desc *desc,
+        struct drv_sched_ctx **out)
 {
         /* pedantic checks */
-        if(DRV_SHED_PCHECKS && !desc) {
-                assert(!"DRV_SHED_RESULT_BAD_PARAM");
-                return DRV_SHED_RESULT_BAD_PARAM;
+        if(DRV_SCHED_PCHECKS && !desc) {
+                assert(!"DRV_SCHED_RESULT_BAD_PARAM");
+                return DRV_SCHED_RESULT_BAD_PARAM;
         }
 
-        if(DRV_SHED_PCHECKS && !out) {
-                assert(!"DRV_SHED_RESULT_BAD_PARAM");
-                return DRV_SHED_RESULT_BAD_PARAM;
+        if(DRV_SCHED_PCHECKS && !out) {
+                assert(!"DRV_SCHED_RESULT_BAD_PARAM");
+                return DRV_SCHED_RESULT_BAD_PARAM;
         }
 
-        if(DRV_SHED_PCHECKS && !desc->shed_alloc) {
-                assert(!"DRV_SHED_RESULT_INVALID_DESC");
-                return DRV_SHED_RESULT_INVALID_DESC;       
+        if(DRV_SCHED_PCHECKS && !desc->sched_alloc) {
+                assert(!"DRV_SCHED_RESULT_INVALID_DESC");
+                return DRV_SCHED_RESULT_INVALID_DESC;
         }
 
         /* create a new ctx */
-        unsigned ctx_bytes = sizeof(struct drv_shed_ctx);
-        void *alloc = desc->shed_alloc(ctx_bytes);
+        unsigned ctx_bytes = sizeof(struct drv_sched_ctx);
+        void *alloc = desc->sched_alloc(ctx_bytes);
+        memset(alloc, 0, ctx_bytes);
 
         if(!alloc) {
-                assert(!"DRV_SHED_RESULT_FAIL");
-                return DRV_SHED_RESULT_FAIL;
+                assert(!"DRV_SCHED_RESULT_FAIL");
+                return DRV_SCHED_RESULT_FAIL;
         }
 
-        struct drv_shed_ctx *new_ctx = alloc;
+        struct drv_sched_ctx *new_ctx = alloc;
 
         /* create resources */
         int i;
@@ -186,81 +208,148 @@ drv_shed_ctx_create(
         /* only assign `out` when setup is complete */
         *out = new_ctx;
 
-        return DRV_SHED_RESULT_OK;
+        return DRV_SCHED_RESULT_OK;
 }
 
 
-drv_shed_result
-drv_shed_ctx_destroy(
-        struct drv_shed_ctx **destroy)
+drv_sched_result
+drv_sched_ctx_destroy(
+        struct drv_sched_ctx_destroy_desc *desc)
 {
-        return DRV_SHED_RESULT_FAIL;
+        if(DRV_SCHED_PCHECKS && !desc) {
+                assert(!"DRV_SCHED_RESULT_BAD_PARAM");
+                return DRV_SCHED_RESULT_BAD_PARAM;
+        }
+        
+        if(DRV_SCHED_PCHECKS && !desc->ctx_to_destroy) {
+                assert(!"DRV_SCHED_RESULT_INVALID_DESC");
+                return DRV_SCHED_RESULT_INVALID_DESC;
+        }
+        
+        /* free if we have been asked to */
+        if(desc->sched_free) {
+                desc->sched_free(*desc->ctx_to_destroy);
+        }
+        
+        *desc->ctx_to_destroy = 0;
+        
+        return DRV_SCHED_RESULT_OK;
 }
 
 
-drv_shed_result
-drv_shed_ctx_join(
-        struct drv_shed_ctx *ctx)
+drv_sched_result
+drv_sched_ctx_join(
+        struct drv_sched_ctx *ctx)
 {
-        return DRV_SHED_RESULT_FAIL;
+        return DRV_SCHED_RESULT_FAIL;
 }
 
 
 /* --------------------------------------------------------------- Enqueue -- */
 
 
-drv_shed_result
-drv_shed_enqueue(
-        struct drv_shed_ctx *ctx,
-        const struct drv_shed_enqueue_desc *desc,
-        uint64_t *batch_mk)
+drv_sched_result
+drv_sched_enqueue(
+        struct drv_sched_ctx *ctx,
+        const struct drv_sched_enqueue_desc *desc,
+        uint64_t *out_batch_mk)
 {
-        return DRV_SHED_RESULT_FAIL;
+        if(DRV_SCHED_PCHECKS && !ctx) {
+                assert(!"DRV_SCHED_RESULT_BAD_PARAM");
+                return DRV_SCHED_RESULT_BAD_PARAM;
+        }
+        
+        if(DRV_SCHED_PCHECKS && !desc) {
+                assert(!"DRV_SCHED_RESULT_BAD_PARAM");
+                return DRV_SCHED_RESULT_BAD_PARAM;
+        }
+        
+        if(DRV_SCHED_PCHECKS && !desc->work_count) {
+                assert(!"DRV_SCHED_RESULT_INVALID_DESC");
+                return DRV_SCHED_RESULT_INVALID_DESC;
+        }
+        
+        if(DRV_SCHED_PCHECKS && !desc->work) {
+                assert(!"DRV_SCHED_RESULT_INVALID_DESC");
+                return DRV_SCHED_RESULT_INVALID_DESC;
+        }
+        
+        int i;
+        uint64_t index = DRV_SCHED_MAX_MARKERS;
+        uint32_t instance = ctx->marker_instance + 1;
+        
+        /* find a new batch id for this */
+        while(index == DRV_SCHED_MAX_MARKERS) {
+                for(i = 0; i < DRV_SCHED_MAX_MARKERS; ++i) {
+                        if(ctx->markers[i].instance == 0) {
+                                index = i;
+                                break;
+                        }
+                }
+        }
+        
+        /* setup marker */
+        ctx->markers[i].instance = instance;
+        ctx->markers[i].jobs_pending = desc->work_count;
+        ctx->markers[i].jobs_enqueued = desc->work_count;
+        
+        uint64_t mk = (index << 32) | instance;
+        
+        if(*out_batch_mk) {
+                *out_batch_mk = mk;
+        }
+        
+        /* for each job enqueue */
+        for(i = 0; i < desc->work_count; ++i) {
+                /* insert work into the task queue */
+        }
+        
+        return DRV_SCHED_RESULT_FAIL;
 }
 
 
-drv_shed_result
-drv_shed_wait(
-        struct drv_shed_ctx *ctx,
+drv_sched_result
+drv_sched_wait(
+        struct drv_sched_ctx *ctx,
         uint64_t wait_mk)
 {
-        return DRV_SHED_RESULT_FAIL;
+        return DRV_SCHED_RESULT_FAIL;
 }
 
 
 /* --------------------------------------------------------------- Details -- */
 
 
-drv_shed_result
-drv_shed_detail_get(
-        struct drv_shed_ctx *ctx,
+drv_sched_result
+drv_sched_detail_get(
+        struct drv_sched_ctx *ctx,
         drv_detail detail,
         int *out)
 {
-        return DRV_SHED_RESULT_FAIL;
+        return DRV_SCHED_RESULT_FAIL;
 }
 
 
 /* -------------------------------------------------------------- Debuging -- */
 
 
-drv_shed_result
-drv_shed_profile_data_get(
-        struct drv_shed_ctx *ctx,
-        struct drv_shed_profile_data *out_data,
+drv_sched_result
+drv_sched_profile_data_get(
+        struct drv_sched_ctx *ctx,
+        struct drv_sched_profile_data *out_data,
         int *out_count)
 {
-        return DRV_SHED_RESULT_FAIL;
+        return DRV_SCHED_RESULT_FAIL;
 }
 
 
 /* ---------------------------------------------------------------- Config -- */
 
 
-#undef DRV_SHED_MAX_THREADS
-#undef DRV_SHED_MAX_MARKERS
-#undef DRV_SHED_MAX_PENDING_WORK
-#undef DRV_SHED_MAX_BLOCKED_WORK
-#undef DRV_SHED_MAX_FIBERS
-#undef DRV_SHED_PCHECKS
-#undef DRV_SHED_LOGGING
+#undef DRV_SCHED_MAX_THREADS
+#undef DRV_SCHED_MAX_MARKERS
+#undef DRV_SCHED_MAX_PENDING_WORK
+#undef DRV_SCHED_MAX_BLOCKED_WORK
+#undef DRV_SCHED_MAX_FIBERS
+#undef DRV_SCHED_PCHECKS
+#undef DRV_SCHED_LOGGING
