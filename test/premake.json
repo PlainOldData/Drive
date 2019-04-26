@@ -1,0 +1,20 @@
+{
+        "projects" : [
+                {
+                        "name" : "drive_func_test",
+                        "kind" : "ConsoleApp",
+                        "language" : "C++",
+
+                        "files" : [
+                                "./premake.json",
+                                "./func/**.md",
+                                "./func/**.hpp",
+                                "./func/**.cpp"
+                        ],
+
+                        "dependencies" : [
+                            "drive"
+                        ]
+                }
+        ]
+}

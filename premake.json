@@ -1,0 +1,25 @@
+{
+        "projects" : [
+                {
+                        "name" : "drive",
+                        "kind" : "StaticLib",
+                        "language" : "C-ANSI",
+
+                        "files" : [
+                                "./premake.json",
+                                "./src/**.md",
+                                "./src/**.h",
+                                "./src/**.c",
+                                "./include/**.h"
+                        ],
+
+                        "include_dirs_public" : [
+                                "./include/"
+                        ],
+
+                        "defines" : [
+                            "HOWDY=1"
+                        ]
+                }
+        ]
+}
