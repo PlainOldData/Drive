@@ -30,11 +30,11 @@ typedef void(*drv_log_fn)(const char *);
 
 
 struct drv_sched_ctx_create_desc {
-        int thread_count;             /* if 0 - then count = (cores - 2) */
-        int thread_pin;               /* if 1 - then pin threads to cores */
-        int thread_names;             /* if 1 - then threads named 'DRV' */
-        drv_shd_alloc_fn sched_alloc;  /* required */
-        drv_log_fn sched_log;          /* optional - must be built with DRV_SCHED_LOGGING = 1*/
+        int thread_count;               /* if 0 - then count = (cores - 2) */
+        int thread_pin;                 /* if 1 - then set thread affinity */
+        const char *thread_name;        /* set name of thread */
+        drv_shd_alloc_fn sched_alloc;   /* required */
+        drv_log_fn sched_log;           /* optional - must be built with DRV_SCHED_LOGGING = 1*/
 };
 
 
@@ -42,6 +42,7 @@ struct drv_sched_ctx_create_desc {
  * returns DRV_SCHED_RESULT_BAD_PARAM if desc is null.
  * returns DRV_SCHED_RESULT_BAD_PARAM if out is null.
  * returns DRV_SCHED_RESULT_INVALID_DESC if desc.sched_alloc is null.
+ * returns DRV_SCHED_RESULT_FAIL on internal failure.
  * returns DRV_SCHED_RESULT_OK on success.
  */
 drv_sched_result
@@ -59,6 +60,7 @@ struct drv_sched_ctx_destroy_desc {
 /*
  * returns DRV_SCHED_RESULT_BAD_PARAM if desc is null.
  * returns DRV_SCHED_RESULT_INVALID_DESC if desc.ctx_to_destroy is null.
+ * returns DRV_SCHED_RESULT_FAIL on internal failure.
  * returns DRV_SCHED_RESULT_OK on success.
  */
 drv_sched_result
@@ -95,6 +97,7 @@ struct drv_sched_enqueue_desc {
  * returns DRV_SCHED_RESULT_BAD_PARAM if desc is null.
  * returns DRV_SCHED_RESULT_INVALID_DESC if desc.work is null.
  * returns DRV_SCHED_RESULT_INVALID_DESC if desc.work_count is less than zero.
+ * returns DRV_SCHED_RESULT_FAIL on internal failure.
  * returns DRV_SCHED_RESULT_OK on success.
  */
 drv_sched_result
@@ -114,20 +117,42 @@ drv_sched_wait(
 
 
 typedef enum _drv_detail {
-        DRV_SCHED_MAX_JOBS,
-        DRV_SCHED_MAX_MARKERS,
-        DRV_SCHED_MAX_FIBERS,
-        DRV_SCHED_MAX_CORE_COUNT,
-        DRV_SCHED_MAX_PROFILE_STORE_BYTES,
-        DRV_SCHED_THREAD_COUNT,
-        DRV_SCHED_PEDANTIC_CHECKS,
-} drv_detail;
+        DRV_SCHED_CTX_DETAIL_MAX_JOBS,
+        DRV_SCHED_CTX_DETAIL_MAX_MARKERS,
+        DRV_SCHED_CTX_DETAIL_MAX_FIBERS,
+        DRV_SCHED_CTX_DETAIL_THREAD_COUNT,      /* including main thread */
+        DRV_SCHED_CTX_DETAIL_PEDANTIC_CHECKS,   /* 1 for yes - 0 for no */
+} drv_ctx_detail;
 
+
+/*
+ * returns DRV_SCHED_RESULT_BAD_PARAM if ctx is null.
+ * returns DRV_SCHED_RESULT_BAD_PARAM if out is null.
+ * returns DRV_SCHED_RESULT_FAIL on internal failure.
+ * returns DRV_SCHED_RESULT_OK on success.
+ */
+drv_sched_result
+drv_sched_ctx_detail_get(
+        struct drv_sched_ctx *ctx,
+        drv_ctx_detail detail,
+        int *out);
+
+
+typedef enum _drv_sys_detail {
+        DRV_SCHED_SYS_DETAIL_PHYSICAL_CORE_COUNT,
+        DRV_SCHED_SYS_DETAIL_LOGICAL_CORE_COUNT,
+} drv_sys_detail;
+
+
+/*
+ * returns DRV_SCHED_RESULT_BAD_PARAM if out is null.
+ * returns DRV_SCHED_RESULT_FAIL on internal failure.
+ * returns DRV_SCHED_RESULT_OK on success.
+ */
 
 drv_sched_result
-drv_sched_detail_get(
-        struct drv_sched_ctx *ctx,
-        drv_detail detail,
+drv_shed_sys_detail_get(
+        drv_sys_detail detail,
         int *out);
 
 

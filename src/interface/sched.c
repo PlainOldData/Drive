@@ -1,5 +1,7 @@
 #include <drive/sched.h>
 #include <assert.h>
+#include <stdlib.h>
+#include <string.h>
 
 
 /* ---------------------------------------------------------------- Config -- */
@@ -52,6 +54,7 @@
 #endif
 #include <pthread.h>
 #include <unistd.h>
+#include <sys/sysinfo.h>
 #elif defined(__APPLE__)
 #include <pthread.h>
 #include <sys/sysctl.h>
@@ -66,12 +69,11 @@
 #include <process.h>
 const DWORD MS_VC_EXCEPTION = 0x406D1388;
 #pragma pack( push, 8 )
-typedef struct tagTHREADNAME_INFO
-{
-  DWORD dwType;
-  LPCSTR szName;
-  DWORD dwThreadID;
-  DWORD dwFlags;
+typedef struct tagTHREADNAME_INFO {
+        DWORD dwType;
+        LPCSTR szName;
+        DWORD dwThreadID;
+        DWORD dwFlags;
 } THREADNAME_INFO;
 #pragma pack(pop)
 #else
@@ -85,6 +87,42 @@ typedef HANDLE thread_t;
 #endif
 
 
+static int
+drv_physical_core_count() {
+        int cpu_count = 0;
+
+        #ifdef _WIN32
+        SYSTEM_INFO sysinfo;
+        GetSystemInfo(&sysinfo);
+        cpu_count = sysinfo.dwNumberOfProcessors;
+        #elif defined(__linux__)
+        cpu_count = get_nprocs();
+        #elif defined(__APPLE__)
+        size_t count_len = sizeof(cpu_count);
+        sysctlbyname("hw.physicalcpu", &cpu_count, &count_len, NULL, 0);
+        #endif
+        
+        return cpu_count;
+}
+
+
+static int
+drv_logical_core_count() {
+        int cpu_count = 0;
+
+        #ifdef _WIN32
+        #error "no impl"
+        #elif defined(__linux__)
+        #error "no impl"
+        #elif defined(__APPLE__)
+        size_t count_len = sizeof(cpu_count);
+        sysctlbyname("hw.logicalcpu", &cpu_count, &count_len, NULL, 0);
+        #endif
+        
+        return cpu_count;
+}
+
+
 /* ---------------------------------------------------- Drive sched Context -- */
 
 
@@ -96,18 +134,26 @@ struct drv_marker {
 
 
 struct drv_work {
-        drv_task_fn *func;
+        drv_task_fn func;
         void *arg;
         int tid;
-        uint64_t this_maker;
+        uint64_t marker;
+};
+
+
+struct drv_thread_arg {
+        char name[64];
+        struct drv_sched_ctx *ctx;
 };
 
 
 struct drv_sched_ctx {
-        thread_t* threads[DRV_SCHED_MAX_THREADS];
+        thread_t threads[DRV_SCHED_MAX_THREADS];
+        struct drv_thread_arg thread_args[DRV_SCHED_MAX_THREADS];
         void* thread_ids[DRV_SCHED_MAX_THREADS];
+        int thread_count;
         
-        void* work[DRV_SCHED_MAX_PENDING_WORK];
+        struct drv_work work[DRV_SCHED_MAX_PENDING_WORK];
         
         struct drv_marker markers[DRV_SCHED_MAX_MARKERS];
         uint32_t marker_instance;
@@ -115,9 +161,14 @@ struct drv_sched_ctx {
         void* blocked[DRV_SCHED_MAX_BLOCKED_WORK];
         void* fibers[DRV_SCHED_MAX_FIBERS];
 
-
         drv_log_fn log_fn;
 };
+
+
+void
+drv_dummy_log(const char *msg) {
+        (void)msg;
+}
 
 
 /* -------------------------------------------------------------- Lifetime -- */
@@ -130,12 +181,140 @@ drv_fiber_proc(
         (void)arg;
 }
 
+#include <stdio.h>
 
-void
+
+void*
 drv_thread_proc(
         void *arg)
 {
-        (void)arg;
+        struct drv_thread_arg *th_arg = (struct drv_thread_arg*)arg;
+        
+        /* we have todo it like this because macOS's pthread doesn't take
+         a thread id */
+        if(strlen(th_arg->name)) {
+                #if defined(__linux__)
+                int success = pthread_setname_np(pthread_self(), th_arg->name);
+                assert(success == 0);
+                #elif defined(__APPLE__)
+                int success = pthread_setname_np(th_arg->name);
+                assert(success == 0);
+                #elif defined(_WIN32)
+                THREADNAME_INFO in;
+                in.dwType = 0x1000;
+                in.szName = th_arg->name;
+                in.dwThreadID = GetCurrentThreadId();
+                in.dwFlags = 0;
+
+                __try {
+                        long si = sizeof(info) / sizeof(ULONG_PTR)
+                        RaiseException(MS_VC_EXCEPTION, 0, si, (ULONG_PTR*)&in);
+                }
+                __except(EXCEPTION_EXECUTE_HANDLER);
+                {
+                }
+                #endif
+        }
+        
+        printf("oi\n");
+        
+        return 0;
+}
+
+
+static int
+drv_sched_setup_threads(
+        const struct drv_sched_ctx_create_desc *desc,
+        struct drv_sched_ctx *ctx)
+{
+        int i;
+        
+        /* thread count */
+        int th_count = desc->thread_count;
+        
+        if(desc->thread_count <= 0) {
+                th_count = drv_logical_core_count() - 1;
+        }
+        
+        if(th_count <= 0) {
+                th_count = 2;
+        }
+        
+        if(DRV_SCHED_LOGGING) {
+                char buf[256];
+                snprintf(buf, sizeof(buf), "Create %d threads", th_count);
+                ctx->log_fn(&buf[0]);
+        }
+        
+        /* setup thread args */
+        for(i = 0; i < th_count; ++i) {
+                ctx->thread_args[i].ctx = ctx;
+                
+                /* copy thread name */
+                char *dst = ctx->thread_args[i].name;
+                const char *src = desc->thread_name;
+                int b_count = strlen(ctx->thread_args[i].name);
+                strncat(dst, src, b_count - 1);
+                
+        }
+        
+        /* create threads */
+        for(i = 1; i < th_count; ++i) {
+                void *arg = (void*)&ctx->thread_args[i];
+        
+                #if defined(__linux__) || defined(__APPLE__)
+                pthread_t th;
+                
+                int success = pthread_create(
+                        &th,
+                        NULL,
+                        drv_thread_proc,
+                        arg);
+                
+                assert(success == 0 && "Failed to create thread");
+                #elif defined(_WIN32)
+                HANDLE th = _beginthreadex(
+                        NULL,
+                        524288,
+                        (_beginthreadex_proc_type)drv_thread_proc,
+                        arg,
+                        0,
+                        NULL)
+                );
+                
+                assert(th && "Failed to create thread");
+                #endif
+                
+                if(!th) {
+                        return 0;
+                }
+                
+                ctx->threads[i] = (thread_t)th;
+        }
+        
+        /* thread affinity */
+        if(desc->thread_pin == 1) {
+                if(DRV_SCHED_LOGGING) {
+                        char buf[128];
+                        snprintf(buf, sizeof(buf), "Lock threads to cores");
+                        ctx->log_fn(&buf[0]);
+                }
+                
+                for(i = 0; i < th_count; ++i) {
+                        #if defined(__linux__)
+                        #warning "platform not supported"
+                        #elif defined(_WIN32)
+                        int core_count = drv_physical_core_count();
+                        SetThreadIdealProcessor(th, i % core_count);
+                        #else
+                        #warning "platform not supported"
+                        #endif
+                }
+        }
+        
+        return 1;
+        
+
 }
 
 
@@ -171,36 +350,27 @@ drv_sched_ctx_create(
         }
 
         struct drv_sched_ctx *new_ctx = alloc;
-
-        /* create resources */
-        int i;
-
-        /* mutex */
-
-        /* create threads */
-        int th_count = 2;
         
-        for(i = 1; i < th_count; ++i) {
-                #if defined(__linux__) || defined(__APPLE__)
-
-                #elif defined(_WIN32)
-                new_ctx->threads[i] = (HANDLE)(_beginthreadex(
-                        NULL,
-                        524288,
-                        (_beginthreadex_proc_type)drv_thread_proc,
-                        NULL, /* arg */
-                        0,
-                        NULL)
-                );
-                #endif
+        /* logging */
+        if(DRV_SCHED_LOGGING && desc->sched_log) {
+                new_ctx->log_fn = desc->sched_log;
+        }
+        else if(DRV_SCHED_LOGGING) {
+                new_ctx->log_fn = drv_dummy_log;
         }
 
+        /* create resources */
+        int success = 0;
+
+        success = drv_sched_setup_threads(desc, new_ctx);
+        if(!success) {
+                assert(!"DRV_SCHED_RESULT_FAIL");
+                goto DRV_FAILED_SETUP;
+        }
+        
         /* fibers */
         int fi_count = 1;
 
-        for(i = 0; i < fi_count; ++i) {
-                /* create fibers */
-        }
 
         /* setup ctx */
 
@@ -209,6 +379,21 @@ drv_sched_ctx_create(
         *out = new_ctx;
 
         return DRV_SCHED_RESULT_OK;
+        
+        /* failed to create context backing out */
+        DRV_FAILED_SETUP: {
+                drv_sched_result success = DRV_SCHED_RESULT_OK;
+                
+                struct drv_sched_ctx_destroy_desc destroy_desc = {0};
+                destroy_desc.ctx_to_destroy = &new_ctx;
+                destroy_desc.sched_free = 0; /* not our job to free */
+                
+                success = drv_sched_ctx_destroy(&destroy_desc);
+                
+                assert(success == DRV_SCHED_RESULT_OK && "DRV_SCHED_RESULT_OK");
+                
+                return DRV_SCHED_RESULT_FAIL;
+        }
 }
 
 
@@ -216,6 +401,7 @@ drv_sched_result
 drv_sched_ctx_destroy(
         struct drv_sched_ctx_destroy_desc *desc)
 {
+        /* pedantic checks */
         if(DRV_SCHED_PCHECKS && !desc) {
                 assert(!"DRV_SCHED_RESULT_BAD_PARAM");
                 return DRV_SCHED_RESULT_BAD_PARAM;
@@ -225,6 +411,30 @@ drv_sched_ctx_destroy(
                 assert(!"DRV_SCHED_RESULT_INVALID_DESC");
                 return DRV_SCHED_RESULT_INVALID_DESC;
         }
+        
+        struct drv_sched_ctx *ctx = *desc->ctx_to_destroy;
+        int i;
+        int th_count = ctx->thread_count;
+        
+        /* destroy threads */
+        for(i = 1; i < th_count; ++i) {
+                if(!ctx->threads[i]) {
+                        continue;
+                }
+        
+                #if defined(__linux__) || defined(__APPLE__)
+                pthread_t th = (pthread_t)ctx->threads[i];
+                pthread_join(th, 0);
+                #elif defined(_WIN32)
+                HANDLE th = (HANDLE)ctx->threads[i];
+                WaitForSingleObject(th, INFINITE);
+                CloseHandle(th);
+                #endif
+                
+                ctx->threads[i] = 0;
+        }
+        
+        return 0;
         
         /* free if we have been asked to */
         if(desc->sched_free) {
@@ -254,6 +464,7 @@ drv_sched_enqueue(
         const struct drv_sched_enqueue_desc *desc,
         uint64_t *out_batch_mk)
 {
+        /* pedantic checks */
         if(DRV_SCHED_PCHECKS && !ctx) {
                 assert(!"DRV_SCHED_RESULT_BAD_PARAM");
                 return DRV_SCHED_RESULT_BAD_PARAM;
@@ -274,8 +485,9 @@ drv_sched_enqueue(
                 return DRV_SCHED_RESULT_INVALID_DESC;
         }
         
-        int i;
-        uint64_t index = DRV_SCHED_MAX_MARKERS;
+        /* new marker */
+        int i, j;
+        uint64_t index    = DRV_SCHED_MAX_MARKERS;
         uint32_t instance = ctx->marker_instance + 1;
         
         /* find a new batch id for this */
@@ -289,22 +501,38 @@ drv_sched_enqueue(
         }
         
         /* setup marker */
-        ctx->markers[i].instance = instance;
-        ctx->markers[i].jobs_pending = desc->work_count;
+        ctx->markers[i].instance      = instance;
+        ctx->markers[i].jobs_pending  = desc->work_count;
         ctx->markers[i].jobs_enqueued = desc->work_count;
         
+        /* marker is packed index and instance */
         uint64_t mk = (index << 32) | instance;
         
         if(*out_batch_mk) {
                 *out_batch_mk = mk;
         }
         
-        /* for each job enqueue */
+        /* insert work into the task queue */
         for(i = 0; i < desc->work_count; ++i) {
-                /* insert work into the task queue */
+                drv_task_fn fn = desc->work[i].func;
+                void *arg = desc->work[i].arg;
+                int tid = desc->work[i].tid_lock ? 1 : -1;
+                
+                j = 0;
+        
+                for(; j < DRV_SCHED_MAX_PENDING_WORK; ++j) {
+                        if(ctx->work[j].marker == 0) {
+                                ctx->work[j].marker = mk;
+                                ctx->work[j].arg    = arg;
+                                ctx->work[j].func   = fn;
+                                ctx->work[j].tid    = tid;
+                                
+                                break;
+                        }
+                }
         }
         
-        return DRV_SCHED_RESULT_FAIL;
+        return DRV_SCHED_RESULT_OK;
 }
 
 
@@ -313,7 +541,18 @@ drv_sched_wait(
         struct drv_sched_ctx *ctx,
         uint64_t wait_mk)
 {
-        return DRV_SCHED_RESULT_FAIL;
+        /* pedantic checks */
+        if(DRV_SCHED_PCHECKS && !ctx) {
+                assert(!"DRV_SCHED_RESULT_BAD_PARAM");
+                return DRV_SCHED_RESULT_BAD_PARAM;
+        }
+        
+        if(DRV_SCHED_PCHECKS && !wait_mk) {
+                assert(!"DRV_SCHED_RESULT_BAD_PARAM");
+                return DRV_SCHED_RESULT_BAD_PARAM;
+        }
+        
+        return DRV_SCHED_RESULT_OK;
 }
 
 
@@ -321,11 +560,69 @@ drv_sched_wait(
 
 
 drv_sched_result
-drv_sched_detail_get(
+drv_sched_ctx_detail_get(
         struct drv_sched_ctx *ctx,
-        drv_detail detail,
+        drv_ctx_detail detail,
         int *out)
 {
+        /* pedantic checks */
+        if(DRV_SCHED_PCHECKS && !ctx) {
+                assert(!"DRV_SCHED_RESULT_BAD_PARAM");
+                return DRV_SCHED_RESULT_BAD_PARAM;
+        }
+        
+        if(DRV_SCHED_PCHECKS && !out) {
+                assert(!"DRV_SCHED_RESULT_BAD_PARAM");
+                return DRV_SCHED_RESULT_BAD_PARAM;
+        }
+        
+        /* details */
+        if(detail == DRV_SCHED_CTX_DETAIL_MAX_JOBS) {
+                *out = DRV_SCHED_MAX_PENDING_WORK;
+                return DRV_SCHED_RESULT_OK;
+        }
+        else if(detail == DRV_SCHED_CTX_DETAIL_MAX_MARKERS) {
+                *out = DRV_SCHED_MAX_MARKERS;
+                return DRV_SCHED_RESULT_OK;
+        }
+        else if(detail == DRV_SCHED_CTX_DETAIL_MAX_FIBERS) {
+                *out = DRV_SCHED_MAX_FIBERS;
+                return DRV_SCHED_RESULT_OK;
+        }
+        else if(detail == DRV_SCHED_CTX_DETAIL_THREAD_COUNT) {
+                *out = ctx->thread_count;
+                return DRV_SCHED_RESULT_OK;
+        }
+        else if(detail == DRV_SCHED_CTX_DETAIL_PEDANTIC_CHECKS) {
+                *out = !!DRV_SCHED_PCHECKS;
+                return DRV_SCHED_RESULT_OK;
+        }
+        
+        assert(!"Unhandled detail");
+        return DRV_SCHED_RESULT_FAIL;
+}
+
+
+drv_sched_result
+drv_sched_sys_detail_get(
+        drv_ctx_detail detail,
+        int *out)
+{
+        if(DRV_SCHED_PCHECKS && !out) {
+                assert(!"DRV_SCHED_RESULT_BAD_PARAM");
+                return DRV_SCHED_RESULT_BAD_PARAM;
+        }
+        
+        if(detail == DRV_SCHED_SYS_DETAIL_PHYSICAL_CORE_COUNT) {
+                *out = drv_physical_core_count();
+                return DRV_SCHED_RESULT_OK;
+        }
+        else if(detail == DRV_SCHED_SYS_DETAIL_LOGICAL_CORE_COUNT) {
+                *out = drv_logical_core_count();
+                return DRV_SCHED_RESULT_OK;
+        }
+        
+        assert(!"Unhandled detail");
         return DRV_SCHED_RESULT_FAIL;
 }
 

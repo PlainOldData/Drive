@@ -4,6 +4,12 @@
 #include <stdio.h>
 
 
+void
+drv_logging(const char *msg) {
+        printf("DRV SCHED: %s\n", msg);
+}
+
+
 /* ----------------------------------------------------------------- Tests -- */
 
 /*
@@ -20,11 +26,12 @@ simple()
         
         /* create ctx */
         struct drv_sched_ctx_create_desc ctx_create_desc = {};
-        ctx_create_desc.thread_count = 0;
-        ctx_create_desc.thread_pin   = 0;
-        ctx_create_desc.thread_names = 0;
+        ctx_create_desc.thread_count  = 0;
+        ctx_create_desc.thread_pin    = 0;
+        ctx_create_desc.thread_name   = "DRV_WORK";
         ctx_create_desc.sched_log     = nullptr;
         ctx_create_desc.sched_alloc   = malloc;
+        ctx_create_desc.sched_log     = drv_logging;
         
         success = drv_sched_ctx_create(&ctx_create_desc, &drv);
         
@@ -54,6 +61,13 @@ simple()
         
         if(success != DRV_SCHED_RESULT_OK) {
                 assert(!"Failed to enqueue work");
+                return 0;
+        }
+        
+        success = drv_sched_wait(drv, mk);
+        
+        if(success != DRV_SCHED_RESULT_OK) {
+                assert(!"Failed to wait");
                 return 0;
         }
         
