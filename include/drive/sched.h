@@ -17,6 +17,7 @@ typedef enum _drv_sched_result {
         DRV_SCHED_RESULT_OK,
         DRV_SCHED_RESULT_BAD_PARAM,
         DRV_SCHED_RESULT_INVALID_DESC,
+        DRV_SCHED_RESULT_OUT_OF_RESOURCES,
         DRV_SCHED_RESULT_FAIL,
 } drv_sched_result;
 

@@ -82,16 +82,74 @@ typedef struct tagTHREADNAME_INFO {
 
 #if defined(__linux__) || defined(__APPLE__)
 typedef pthread_t thread_t;
+typedef pthread_mutex_t mutex_t;
 #elif defined(_WIN32)
 typedef HANDLE thread_t;
+typedef CRITICAL_SECTION mutex_t;
 #endif
+
+
+struct drv_signal
+{
+        #if defined( _WIN32 )
+        CRITICAL_SECTION mutex;
+        CONDITION_VARIABLE condition;
+        int value;
+        #elif defined( __linux__ ) || defined( __APPLE__ )
+        pthread_mutex_t mutex;
+        pthread_cond_t condition;
+        int value;
+        #endif
+};
+
+
+void
+drv_mutex_create(mutex_t *m) {
+        #if defined(__linux__) || (__APPLE__)
+        pthread_mutex_init(m, NULL);
+        #elif defined(_WIN32)
+        InitializeCriticalSectionAndSpinCount(m, 32);
+        #endif
+}
+
+void
+drv_mutex_destroy(mutex_t *m)
+{
+        #if defined(__linux__) || defined(__APPLE__)
+        pthread_mutex_destroy((pthread_mutex_t*) m);
+        #elif defined(_WIN32)
+        DeleteCriticalSection((CRITICAL_SECTION*)m);
+        #endif
+}
+
+
+void
+drv_mutex_lock(mutex_t *m)
+{
+        #if defined(__linux__) || defined(__APPLE__)
+        pthread_mutex_lock((pthread_mutex_t*)m);
+        #elif defined(_WIN32)
+        EnterCriticalSection((CRITICAL_SECTION*)m);
+        #endif
+}
+
+
+void
+drv_mutex_unlock(mutex_t *m)
+{
+        #if defined(__linux__) || defined(__APPLE__)
+        pthread_mutex_unlock((pthread_mutex_t*)m);
+        #elif defined(_WIN32)
+        LeaveCriticalSection((CRITICAL_SECTION*)m);
+        #endif
+}
 
 
 static int
 drv_physical_core_count() {
         int cpu_count = 0;
 
-        #ifdef _WIN32
+        #if defined(_WIN32)
         SYSTEM_INFO sysinfo;
         GetSystemInfo(&sysinfo);
         cpu_count = sysinfo.dwNumberOfProcessors; /* need phy cores */
@@ -150,17 +208,22 @@ struct drv_thread_arg {
 
 
 struct drv_sched_ctx {
+        mutex_t mut;
+
         thread_t threads[DRV_SCHED_MAX_THREADS];
         struct drv_thread_arg thread_args[DRV_SCHED_MAX_THREADS];
         void* thread_ids[DRV_SCHED_MAX_THREADS];
         int thread_count;
         
         struct drv_work work[DRV_SCHED_MAX_PENDING_WORK];
+        int work_count;
         
         struct drv_marker markers[DRV_SCHED_MAX_MARKERS];
+        int marker_count;
         uint32_t marker_instance;
         
         void* blocked[DRV_SCHED_MAX_BLOCKED_WORK];
+        
         void* fibers[DRV_SCHED_MAX_FIBERS];
 
         drv_log_fn log_fn;
@@ -228,6 +291,9 @@ drv_sched_setup_threads(
         struct drv_sched_ctx *ctx)
 {
         int i;
+        
+        /* mutex */
+        drv_mutex_create(&ctx->mut);
         
         /* thread count */
         int th_count = desc->thread_count;
@@ -416,6 +482,8 @@ drv_sched_ctx_destroy(
         int i;
         int th_count = ctx->thread_count;
         
+        drv_mutex_lock(&ctx->mut);
+        
         /* destroy threads */
         for(i = 1; i < th_count; ++i) {
                 if(!ctx->threads[i]) {
@@ -433,6 +501,9 @@ drv_sched_ctx_destroy(
                 
                 ctx->threads[i] = 0;
         }
+        
+        drv_mutex_unlock(&ctx->mut);
+        drv_mutex_destroy(&ctx->mut);
         
         return 0;
         
@@ -485,10 +556,23 @@ drv_sched_enqueue(
                 return DRV_SCHED_RESULT_INVALID_DESC;
         }
         
+        drv_mutex_lock(&ctx->mut);
+        
+        if(DRV_SCHED_PCHECKS) {
+                int needed = desc->work_count + ctx->work_count;
+                if(needed > DRV_SCHED_MAX_PENDING_WORK) {
+                        /* increase max work items */
+                        assert(!"DRV_SCHED_RESULT_OUT_OF_RESOURCES");
+                        
+                        drv_mutex_unlock(&ctx->mut);
+                        return DRV_SCHED_RESULT_OUT_OF_RESOURCES;
+                }
+        }
+        
         /* new marker */
-        int i, j;
+        int i;
         uint64_t index    = DRV_SCHED_MAX_MARKERS;
-        uint32_t instance = ctx->marker_instance + 1;
+        uint32_t instance = ++ctx->marker_instance;
         
         /* find a new batch id for this */
         while(index == DRV_SCHED_MAX_MARKERS) {
@@ -508,29 +592,27 @@ drv_sched_enqueue(
         /* marker is packed index and instance */
         uint64_t mk = (index << 32) | instance;
         
-        if(*out_batch_mk) {
+        if(out_batch_mk) {
                 *out_batch_mk = mk;
         }
         
         /* insert work into the task queue */
-        for(i = 0; i < desc->work_count; ++i) {
+        int in_idx = ctx->work_count;
+        for(i = 0; i < desc->work_count; ++i, ++in_idx) {
                 drv_task_fn fn = desc->work[i].func;
                 void *arg = desc->work[i].arg;
                 int tid = desc->work[i].tid_lock ? 1 : -1;
                 
-                j = 0;
-        
-                for(; j < DRV_SCHED_MAX_PENDING_WORK; ++j) {
-                        if(ctx->work[j].marker == 0) {
-                                ctx->work[j].marker = mk;
-                                ctx->work[j].arg    = arg;
-                                ctx->work[j].func   = fn;
-                                ctx->work[j].tid    = tid;
-                                
-                                break;
-                        }
-                }
+                /* insert work */
+                ctx->work[in_idx].marker = mk;
+                ctx->work[in_idx].arg    = arg;
+                ctx->work[in_idx].func   = fn;
+                ctx->work[in_idx].tid    = tid;
         }
+        
+        ctx->work_count += desc->work_count;
+        
+        drv_mutex_unlock(&ctx->mut);
         
         return DRV_SCHED_RESULT_OK;
 }
