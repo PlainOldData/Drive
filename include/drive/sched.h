@@ -24,7 +24,7 @@ typedef enum _drv_sched_result {
 /* -------------------------------------------------------------- Lifetime -- */
 
 
-typedef void*(*drv_shd_alloc_fn)(unsigned long);
+typedef void*(*drv_shd_alloc_fn)(size_t);
 typedef void(*drv_sched_free_fn)(void *);
 typedef void(*drv_log_fn)(const char *);
 

@@ -94,7 +94,7 @@ drv_physical_core_count() {
         #ifdef _WIN32
         SYSTEM_INFO sysinfo;
         GetSystemInfo(&sysinfo);
-        cpu_count = sysinfo.dwNumberOfProcessors;
+        cpu_count = sysinfo.dwNumberOfProcessors; /* need phy cores */
         #elif defined(__linux__)
         cpu_count = get_nprocs();
         #elif defined(__APPLE__)
@@ -111,7 +111,9 @@ drv_logical_core_count() {
         int cpu_count = 0;
 
         #ifdef _WIN32
-        #error "no impl"
+        SYSTEM_INFO sysinfo;
+        GetSystemInfo(&sysinfo);
+        cpu_count = sysinfo.dwNumberOfProcessors;
         #elif defined(__linux__)
         #error "no impl"
         #elif defined(__APPLE__)
@@ -207,12 +209,10 @@ drv_thread_proc(
                 in.dwFlags = 0;
 
                 __try {
-                        long si = sizeof(info) / sizeof(ULONG_PTR)
+                        long si = sizeof(in) / sizeof(ULONG_PTR);
                         RaiseException(MS_VC_EXCEPTION, 0, si, (ULONG_PTR*)&in);
                 }
-                __except(EXCEPTION_EXECUTE_HANDLER);
-                {
-                }
+                __except(EXCEPTION_EXECUTE_HANDLER) {}
                 #endif
         }
         
@@ -279,8 +279,7 @@ drv_sched_setup_threads(
                         (_beginthreadex_proc_type)drv_thread_proc,
                         arg,
                         0,
-                        NULL)
-                );
+                        NULL);
                 
                 assert(th && "Failed to create thread");
                 #endif
@@ -304,6 +303,7 @@ drv_sched_setup_threads(
                         #if defined(__linux__)
                         #warning "platform not supported"
                         #elif defined(_WIN32)
+                        HANDLE th = (HANDLE)ctx->threads[i];
                         int core_count = drv_physical_core_count();
                         SetThreadIdealProcessor(th, i % core_count);
                         #else
