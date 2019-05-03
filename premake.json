@@ -13,12 +13,26 @@
                                 "./include/**.h"
                         ],
 
-                        "include_dirs_public" : [
-                                "./include/"
+                        "files-windows" : [
+                                "./src/thirdparty/boost_context/asm/jump_x86_64_ms_pe_masm.asm",
+                                "./src/thirdparty/boost_context/asm/make_x86_64_ms_pe_masm.asm"
                         ],
 
-                        "defines" : [
-                            "HOWDY=1"
+                        "files-macosx" : [
+                                "./src/thirdparty/boost_context/asm/jump_x86_64_sysv_macho_gas.S",
+                                "./src/thirdparty/boost_context/asm/make_x86_64_sysv_macho_gas.S"
+                        ],
+
+                        "files-linux" : [
+                                "./src/thirdparty/boost_context/asm/jump_x86_64_sysv_elf_gas.S",
+                                "./src/thirdparty/boost_context/asm/make_x86_64_sysv_elf_gas.S"
+                        ],
+
+
+                        "include_dirs_public" : [
+                                "./include/",
+                                "./src/",
+                                "./src/thirdparty/boost_context/include/"
                         ]
                 }
         ]

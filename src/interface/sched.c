@@ -1,4 +1,5 @@
 #include <drive/sched.h>
+#include <boost_context/fcontext.h>
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -95,7 +96,7 @@ struct drv_signal
         CRITICAL_SECTION mutex;
         CONDITION_VARIABLE condition;
         int value;
-        #elif defined( __linux__ ) || defined( __APPLE__ )
+        #elif defined(__linux__) || defined(__APPLE__)
         pthread_mutex_t mutex;
         pthread_cond_t condition;
         int value;
@@ -152,7 +153,7 @@ drv_physical_core_count() {
         #if defined(_WIN32)
         SYSTEM_INFO sysinfo;
         GetSystemInfo(&sysinfo);
-        cpu_count = sysinfo.dwNumberOfProcessors;
+        cpu_count = sysinfo.dwNumberOfProcessors; /* need phy cores */
         #elif defined(__linux__)
         cpu_count = get_nprocs();
         #elif defined(__APPLE__)
@@ -169,7 +170,9 @@ drv_logical_core_count() {
         int cpu_count = 0;
 
         #ifdef _WIN32
-        #error "no impl"
+        SYSTEM_INFO sysinfo;
+        GetSystemInfo(&sysinfo);
+        cpu_count = sysinfo.dwNumberOfProcessors;
         #elif defined(__linux__)
         #error "no impl"
         #elif defined(__APPLE__)
@@ -205,6 +208,19 @@ struct drv_thread_arg {
 };
 
 
+
+struct drv_fiber
+{
+        void *stack;
+        size_t sys_page_size;
+        size_t stack_size;
+        fcontext_t context;
+        void *arg;
+
+        struct drv_work work_item;
+};
+
+
 struct drv_sched_ctx {
         mutex_t mut;
 
@@ -222,9 +238,14 @@ struct drv_sched_ctx {
         
         void* blocked[DRV_SCHED_MAX_BLOCKED_WORK];
         
-        void* fibers[DRV_SCHED_MAX_FIBERS];
+        struct drv_fiber *free_fibers[DRV_SCHED_MAX_FIBERS];
+        int free_fiber_count;
+        
+        struct drv_fiber fibers[DRV_SCHED_MAX_FIBERS];
+        
+        int running;
 
-        drv_log_fn log_fn;
+        drv_sched_log_fn log_fn;
 };
 
 
@@ -252,6 +273,7 @@ drv_thread_proc(
         void *arg)
 {
         struct drv_thread_arg *th_arg = (struct drv_thread_arg*)arg;
+        struct drv_sched_ctx *ctx = th_arg->ctx;
         
         /* we have todo it like this because macOS's pthread doesn't take
          a thread id */
@@ -270,16 +292,58 @@ drv_thread_proc(
                 in.dwFlags = 0;
 
                 __try {
-                        long si = sizeof(info) / sizeof(ULONG_PTR)
+                        long si = sizeof(in) / sizeof(ULONG_PTR);
                         RaiseException(MS_VC_EXCEPTION, 0, si, (ULONG_PTR*)&in);
                 }
-                __except(EXCEPTION_EXECUTE_HANDLER);
-                {
-                }
+                __except(EXCEPTION_EXECUTE_HANDLER) {}
                 #endif
         }
         
-        printf("oi\n");
+        int this_tid = 123;
+        
+        /* search for a job */
+        while(ctx->running) {
+                
+                /* look at pending jobs */
+                drv_mutex_lock(&ctx->mut);
+                
+                int i;
+                struct drv_work *work = 0;
+                struct drv_fiber *fi = 0;
+                
+                for(i = 0; i < ctx->work_count; ++i) {
+                        struct drv_work *w = &ctx->work[i];
+                        
+                        if(w->tid == -1 || w->tid == this_tid) {
+                                work = w;
+                                break;
+                        }
+                }
+                
+                /* look for fiber */
+                if(work) {
+                        assert(ctx->free_fiber_count);
+                        
+                        if(ctx->free_fiber_count) {
+                                int fi_idx = ctx->free_fiber_count - 1;
+                                fi = ctx->free_fibers[fi_idx];
+                        }
+                        
+                        if(!fi) {
+                            assert(!"No fiber found.");
+                        }
+                }
+                
+                if(work && fi) {
+                        fi->work_item = *work;
+                        /* remove work from queue */
+                        assert(0);
+                }
+                
+                drv_mutex_unlock(&ctx->mut);
+                
+                
+        }
         
         return 0;
 }
@@ -345,8 +409,7 @@ drv_sched_setup_threads(
                         (_beginthreadex_proc_type)drv_thread_proc,
                         arg,
                         0,
-                        NULL)
-                );
+                        NULL);
                 
                 assert(th && "Failed to create thread");
                 #endif
@@ -370,6 +433,7 @@ drv_sched_setup_threads(
                         #if defined(__linux__)
                         #warning "platform not supported"
                         #elif defined(_WIN32)
+                        HANDLE th = (HANDLE)ctx->threads[i];
                         int core_count = drv_physical_core_count();
                         SetThreadIdealProcessor(th, i % core_count);
                         #else
@@ -381,6 +445,44 @@ drv_sched_setup_threads(
         return 1;
         
 
+}
+
+int
+drv_sched_setup_fibers(
+        const struct drv_sched_ctx_create_desc *desc,
+        struct drv_sched_ctx *ctx)
+{
+        int i;
+        int stack_size = 524288;
+        int bytes = stack_size + stack_size + stack_size;
+        
+        /* create fibers */
+        for(i = 0; i < DRV_SCHED_MAX_FIBERS; ++i) {
+                struct drv_fiber *fi = &ctx->fibers[i];
+        
+                fi->stack = desc->sched_alloc(bytes);
+                
+                if(!fi->stack) {
+                        assert(!"Failed to allocate space for fiber");
+                        return 0;
+                }
+                
+                memset(fi->stack, 0, bytes);
+                
+                char *start = ((char*)fi->stack) + stack_size;
+                fi->context = make_fcontext(start, stack_size, drv_fiber_proc);
+
+                fi->arg = ctx;
+        }
+        
+        /* create fiber free list */
+        for(i = 0; i < DRV_SCHED_MAX_FIBERS; ++i) {
+                ctx->free_fibers[i] = &ctx->fibers[i];
+        }
+        
+        ctx->free_fiber_count = DRV_SCHED_MAX_FIBERS;
+        
+        return 1;
 }
 
 
@@ -424,6 +526,8 @@ drv_sched_ctx_create(
         else if(DRV_SCHED_LOGGING) {
                 new_ctx->log_fn = drv_dummy_log;
         }
+        
+        new_ctx->running = 1;
 
         /* create resources */
         int success = 0;
@@ -435,8 +539,11 @@ drv_sched_ctx_create(
         }
         
         /* fibers */
-        int fi_count = 1;
-
+        success = drv_sched_setup_fibers(desc, new_ctx);
+        if(!success) {
+                assert(!"DRV_SCHED_RESULT_FAIL");
+                goto DRV_FAILED_SETUP;
+        }
 
         /* setup ctx */
 
