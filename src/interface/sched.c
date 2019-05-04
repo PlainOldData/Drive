@@ -202,13 +202,6 @@ struct drv_work {
 };
 
 
-struct drv_thread_arg {
-        char name[64];
-        struct drv_sched_ctx *ctx;
-};
-
-
-
 struct drv_fiber
 {
         void *stack;
@@ -218,6 +211,14 @@ struct drv_fiber
         void *arg;
 
         struct drv_work work_item;
+};
+
+
+struct drv_thread_arg {
+        char name[64];
+        fcontext_t home_context;
+        struct drv_fiber *work_fiber;
+        struct drv_sched_ctx *ctx;
 };
 
 
@@ -262,7 +263,40 @@ void
 drv_fiber_proc(
         void *arg)
 {
-        (void)arg;
+        struct drv_thread_arg *fi_arg = (struct drv_thread_arg*)arg;
+        struct drv_sched_ctx *ctx = fi_arg->ctx;
+        
+        for(;;) {
+                struct drv_thread_arg *th_arg = (struct drv_thread_arg*)arg;
+                struct drv_fiber *fi = th_arg->work_fiber;
+        
+                drv_task_fn task =  fi->work_item.func;
+                void *arg = fi->work_item.arg;
+                
+                task(th_arg->ctx, arg);
+        
+                /* switch back to thread proc */
+                fcontext_t *this_fi = &fi->context;
+                fcontext_t that_fi = th_arg->home_context;
+                
+                /* lock and update marker */
+                drv_mutex_lock(&ctx->mut);
+                
+                uint64_t marker = fi->work_item.marker;
+                uint32_t instance = (uint32_t)(marker & 0xFFFFFFFF);
+                uint32_t index = (uint32_t)((marker >> 32) & 0xFFFFFFFF);
+                
+                assert(ctx->markers[index].instance == instance);
+                ctx->markers[index].jobs_pending -= 1;
+                
+                if(ctx->markers[index].jobs_pending == 0) {
+                        ctx->markers[index].instance = 0;
+                }
+                
+                drv_mutex_unlock(&ctx->mut);
+                
+                jump_fcontext(this_fi, that_fi, NULL);
+        }
 }
 
 #include <stdio.h>
@@ -273,6 +307,7 @@ drv_thread_proc(
         void *arg)
 {
         struct drv_thread_arg *th_arg = (struct drv_thread_arg*)arg;
+        th_arg->home_context = NULL;
         struct drv_sched_ctx *ctx = th_arg->ctx;
         
         /* we have todo it like this because macOS's pthread doesn't take
@@ -309,6 +344,7 @@ drv_thread_proc(
                 
                 int i;
                 struct drv_work *work = 0;
+                int wk_idx = 0;
                 struct drv_fiber *fi = 0;
                 
                 for(i = 0; i < ctx->work_count; ++i) {
@@ -316,6 +352,7 @@ drv_thread_proc(
                         
                         if(w->tid == -1 || w->tid == this_tid) {
                                 work = w;
+                                wk_idx = i;
                                 break;
                         }
                 }
@@ -334,14 +371,34 @@ drv_thread_proc(
                         }
                 }
                 
-                if(work && fi) {
-                        fi->work_item = *work;
-                        /* remove work from queue */
-                        assert(0);
+                if(!work || !fi) {
+                        drv_mutex_unlock(&ctx->mut);
+                        /* sleep */
+                        continue;
                 }
+                
+                /* remove work from queue */
+                fi->work_item = *work;
+                th_arg->work_fiber = fi;
+                
+                void *dst = &ctx->work[wk_idx];
+                void *src = &ctx->work[wk_idx + 1];
+                
+                int size = sizeof(ctx->work) / sizeof(ctx->work[0]);
+                int count = size - wk_idx - 1;
+                int bytes = sizeof(ctx->work[0]) * count;
+                
+                memmove(dst, src, bytes);
+                ctx->work_count -= 1;
                 
                 drv_mutex_unlock(&ctx->mut);
                 
+                /* jump into fiber proc */
+                fcontext_t *this_fi = &th_arg->home_context;
+                fcontext_t that_fi = fi->context;
+                jump_fcontext(this_fi, that_fi, th_arg);
+                
+                /* jumped back to thread proc */
                 
         }
         
@@ -469,10 +526,8 @@ drv_sched_setup_fibers(
                 
                 memset(fi->stack, 0, bytes);
                 
-                char *start = ((char*)fi->stack) + stack_size;
+                void *start = ((char*)fi->stack) + stack_size;
                 fi->context = make_fcontext(start, stack_size, drv_fiber_proc);
-
-                fi->arg = ctx;
         }
         
         /* create fiber free list */
@@ -612,8 +667,6 @@ drv_sched_ctx_destroy(
         drv_mutex_unlock(&ctx->mut);
         drv_mutex_destroy(&ctx->mut);
         
-        return 0;
-        
         /* free if we have been asked to */
         if(desc->sched_free) {
                 desc->sched_free(*desc->ctx_to_destroy);
@@ -740,6 +793,29 @@ drv_sched_wait(
                 assert(!"DRV_SCHED_RESULT_BAD_PARAM");
                 return DRV_SCHED_RESULT_BAD_PARAM;
         }
+        
+        
+        for(;;) {
+                int found = 1;
+        
+                drv_mutex_lock(&ctx->mut);
+
+                uint32_t instance = (uint32_t)(wait_mk & 0xFFFFFFFF);
+                uint32_t index = (uint32_t)((wait_mk >> 32) & 0xFFFFFFFF);
+
+                if(ctx->markers[index].instance != instance) {
+                        found = 0;
+                }
+
+                drv_mutex_unlock(&ctx->mut);
+                
+                if(found) {
+                        sleep(10);
+                } else {
+                        break;
+                }
+        }
+        
         
         return DRV_SCHED_RESULT_OK;
 }
