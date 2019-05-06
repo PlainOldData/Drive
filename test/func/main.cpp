@@ -53,8 +53,9 @@ batch_and_wait()
                                 wk[i].arg = &vals[i];
                                 wk[i].tid_lock = 0;
                                 wk[i].func = [](struct drv_sched_ctx*ctx, void *arg) {
+                                        (void)ctx;
                                         int*v = (int*)arg;
-                                        *v = 321;
+                                        *v = 1;
                                 };
                         }
 
@@ -64,9 +65,25 @@ batch_and_wait()
                         enq_desc.blocked_mk = 0;
 
                         uint64_t mk = 0;
-                        int success = drv_sched_enqueue(ctx, &enq_desc, &mk);
+                        drv_sched_result success = DRV_SCHED_RESULT_OK;
+                        success = drv_sched_enqueue(ctx, &enq_desc, &mk);
+                        
+                        if(success != DRV_SCHED_RESULT_OK) {
+                                assert(!"Failed to enqueue");
+                        }
 
-                        drv_sched_wait(ctx, mk);
+                        success = drv_sched_wait(ctx, mk);
+                        
+                        if(success != DRV_SCHED_RESULT_OK) {
+                                assert(!"Failed to wait");
+                        }
+                        
+                        int *v = (int*)arg;
+                        
+                        for(int i = 0; i < sub_batch_size; ++i) {
+                                *v += vals[i];
+                                assert(vals[i]);
+                        }
                 };
         }
         

@@ -92,7 +92,7 @@ typedef struct tagTHREADNAME_INFO {
 #if defined(__linux__) || defined(__APPLE__)
 typedef pthread_t thread_t;
 typedef pthread_mutex_t mutex_t;
-typedef pthread_id_t thread_id_t;
+typedef uint64_t thread_id_t;
 #elif defined(_WIN32)
 typedef uintptr_t thread_t;
 typedef CRITICAL_SECTION mutex_t;
@@ -154,6 +154,29 @@ drv_mutex_unlock(mutex_t *m)
         pthread_mutex_unlock((pthread_mutex_t*)m);
         #elif defined(_WIN32)
         LeaveCriticalSection((CRITICAL_SECTION*)m);
+        #endif
+}
+
+
+thread_id_t
+drv_thread_id_self() {
+        thread_id_t th_id;
+        #ifdef WIN32
+        th_id = GetCurrentThreadId();
+        #else
+        pthread_threadid_np(NULL, &th_id);
+        #endif
+        
+        return th_id;
+}
+
+
+int
+drv_thread_id_equal(thread_id_t a, thread_id_t b) {
+        #ifdef WIN32
+        return a == b;
+        #else
+        return pthread_equal(a, b) != 0 ? 1 : 0 ;
         #endif
 }
 
@@ -253,7 +276,7 @@ struct drv_sched_ctx {
         int marker_count;
         uint32_t marker_instance;
         
-        void* blocked[DRV_SCHED_MAX_BLOCKED_WORK];
+        struct drv_fiber *blocked[DRV_SCHED_MAX_BLOCKED_WORK];
         int blocked_count;
         
         struct drv_fiber *free_fibers[DRV_SCHED_MAX_FIBERS];
@@ -281,7 +304,7 @@ drv_fiber_proc(
         void *arg)
 {
         int i;
-        struct drv_sched_ctx *ctx = (struct drv_thread_arg*)arg;
+        struct drv_sched_ctx *ctx = (struct drv_sched_ctx*)arg;
 
         if(DRV_PANIC_LOGGING) {
                 printf("DRV Fiber Started\n");
@@ -293,7 +316,7 @@ drv_fiber_proc(
                 }
 
                 /* reaquire thread arg */
-                thread_id_t th_id = GetCurrentThreadId();
+                thread_id_t th_id = drv_thread_id_self();
 
                 struct drv_thread_arg *th_arg = 0;
 
@@ -365,7 +388,8 @@ drv_thread_proc(
         void *arg)
 {
         struct drv_thread_arg *th_arg = (struct drv_thread_arg*)arg;
-        th_arg->thread_id = GetCurrentThreadId();
+        
+        th_arg->thread_id = drv_thread_id_self();
         th_arg->home_context = NULL;
         struct drv_sched_ctx *ctx = th_arg->ctx;
 
@@ -400,7 +424,7 @@ drv_thread_proc(
         /* search for a job */
         while(ctx->running) {
                 /* allow main thread to quit if work is done */
-                if(th_arg->thread_id == ctx->thread_args[0].thread_id) {
+                if(drv_thread_id_equal(th_arg->thread_id, ctx->thread_args[0].thread_id)) {
                         if(ctx->free_fiber_count == DRV_SCHED_MAX_FIBERS &&
                            ctx->work_count == 0 &&
                            ctx->blocked_count == 0)
@@ -409,10 +433,62 @@ drv_thread_proc(
                         }
                 }
                 
+                int i;
+                
+                /* look at blocked jobs */
+                drv_mutex_lock(&ctx->mut);
+                
+                int blocked = ctx->blocked_count;
+                
+                struct drv_fiber *blocked_fi = 0;
+                
+                for(i = 0; i < DRV_SCHED_MAX_BLOCKED_WORK; ++i) {
+                        if(ctx->blocked[i] == 0) {
+                                continue;
+                        }
+                
+                        uint64_t mk = ctx->blocked[i]->work_item.marker;
+                        
+                        uint32_t instance = (uint32_t)(mk & 0xFFFFFFFF);
+                        uint32_t idx = (uint32_t)((mk >> 32) & 0xFFFFFFFF);
+                        
+                        if(ctx->markers[idx].instance != instance) {
+                                break;
+                        }
+                        
+                        if(ctx->markers[idx].jobs_pending > 0) {
+                                break;
+                        }
+                        
+                        blocked_fi = ctx->blocked[i];
+                        ctx->blocked[i] = 0;
+                        ctx->blocked_count -= 1;
+                }
+        
+                drv_mutex_unlock(&ctx->mut);
+                
+                if(blocked_fi) {
+                        th_arg->work_fiber = blocked_fi;
+                        
+                        /* continue work */
+                        fcontext_t *this_fi = &th_arg->home_context;
+                        fcontext_t that_fi = blocked_fi->context;
+
+                        if(DRV_PANIC_LOGGING) {
+                                printf("DRV Thread %d Jump to Fiber %p to continue\n",
+                                        th_arg->thread_id,
+                                        blocked_fi);
+                        }
+
+                        jump_fcontext(this_fi, that_fi, th_arg->ctx);
+                        
+                        /* and back */
+                        continue;
+                }
+                
                 /* look at pending jobs */
                 drv_mutex_lock(&ctx->mut);
                 
-                int i;
                 struct drv_work *work = 0;
                 int wk_idx = 0;
                 struct drv_fiber *fi = 0;
@@ -420,7 +496,7 @@ drv_thread_proc(
                 for(i = 0; i < ctx->work_count; ++i) {
                         struct drv_work *w = &ctx->work[i];
                         
-                        if(w->tid == -1 || w->tid == th_arg->thread_id) {
+                        if(w->tid == -1 || drv_thread_id_equal(w->tid, th_arg->thread_id)) {
                                 work = w;
                                 wk_idx = i;
                                 break;
@@ -480,18 +556,21 @@ drv_thread_proc(
                 jump_fcontext(this_fi, that_fi, th_arg->ctx);
                 
                 /* jumped back to thread proc */
-                finished += 1;
+                /* if not blocked we can add fiber back to free list */
+                if(th_arg->work_fiber) {
+                        finished += 1;
 
-                /* add fiber back to free queue */
-                /* reaquire fiber data as it might have changed in jumps */
-                fi = th_arg->work_fiber;
-                drv_mutex_lock(&ctx->mut);
+                        /* add fiber back to free queue */
+                        /* reaquire fiber data as it might have changed in jumps */
+                        fi = th_arg->work_fiber;
+                        drv_mutex_lock(&ctx->mut);
 
-                int last_idx = ctx->free_fiber_count;
-                ctx->free_fibers[last_idx] = fi;
-                ctx->free_fiber_count += 1;
+                        int last_idx = ctx->free_fiber_count;
+                        ctx->free_fibers[last_idx] = fi;
+                        ctx->free_fiber_count += 1;
 
-                drv_mutex_unlock(&ctx->mut);
+                        drv_mutex_unlock(&ctx->mut);
+                }
         }
         
         return 0;
@@ -539,7 +618,9 @@ drv_sched_setup_threads(
 
 
         /* thread id for main thread */
-        ctx->main_thread = (thread_id_t)GetCurrentThreadId();
+        thread_id_t th_id = drv_thread_id_self();
+        
+        ctx->main_thread = th_id;
         
         /* create threads */
         for(i = 1; i < th_count; ++i) {
@@ -786,9 +867,10 @@ drv_sched_ctx_join(
         }
 
         if(DRV_SCHED_PCHECKS) {
-                thread_id_t this_id = (thread_id_t)GetCurrentThreadId();
-
-                if (this_id != ctx->main_thread) {
+                thread_id_t th_id = drv_thread_id_self();
+                int same_th = drv_thread_id_equal(th_id, ctx->main_thread);
+                
+                if(!same_th) {
                         assert(!"DRV_SCHED_RESULT_BAD_CALL");
                         return DRV_SCHED_RESULT_BAD_CALL;
                 }
@@ -911,22 +993,50 @@ drv_sched_wait(
         int i;
 
         /* find thread */
-        thread_id_t self_id = GetCurrentThreadId();
-        int tls = -1;
-
+        thread_id_t th_id = drv_thread_id_self();
+        
+        struct drv_thread_arg *tls = 0;
+        
         for(i = 0; i < ctx->thread_count; ++i) {
-                if(ctx->thread_args[i].thread_id == tls) {
-                        tls = i;
+                if(drv_thread_id_equal(ctx->thread_args[i].thread_id, th_id)) {
+                        tls = &ctx->thread_args[i];
                         break;
                 };
         };
         
         /* block current task switch fiber back to thread_proc */
-        if(tls != -1) {
+        if(tls) {
                 /* push fiber to blocked */
                 drv_mutex_lock(&ctx->mut);
-
+                
+                int count = ctx->blocked_count;
+                assert(count < DRV_SCHED_MAX_BLOCKED_WORK);
+                
+                if(count < DRV_SCHED_MAX_BLOCKED_WORK) {
+                        for(i = 0; i < DRV_SCHED_MAX_BLOCKED_WORK; ++i) {
+                                if(ctx->blocked[i] == 0) {
+                                        ctx->blocked[i] = tls->work_fiber;
+                                        ctx->blocked_count += 1;
+                                        break;
+                                }
+                        }
+                }
+                
                 drv_mutex_unlock(&ctx->mut);
+                
+                /* switch back to thread proc */
+                fcontext_t *this_fi = &tls->work_fiber->context;
+                fcontext_t that_fi = tls->home_context;
+
+                if(DRV_PANIC_LOGGING) {
+                        printf("DRV Wait %p Jump back to thread proc\n", tls->work_fiber);
+                }
+                
+                tls->work_fiber = 0;
+
+                jump_fcontext(this_fi, that_fi, NULL);
+
+                
         }
 
         /* thread not in pool so spin until marker is done */
@@ -946,7 +1056,11 @@ drv_sched_wait(
                         drv_mutex_unlock(&ctx->mut);
                 
                         if(found) {
+                                #ifdef _WIN32
                                 Sleep(10);
+                                #else
+                                sleep(100);
+                                #endif
                         } else {
                                 break;
                         }

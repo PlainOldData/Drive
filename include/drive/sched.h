@@ -26,7 +26,11 @@ typedef enum _drv_sched_result {
 /* -------------------------------------------------------------- Lifetime -- */
 
 
+#ifdef WIN32
 typedef void*(*drv_sched_alloc_fn)(size_t);
+#else
+typedef void*(*drv_sched_alloc_fn)(unsigned long);
+#endif
 typedef void(*drv_sched_free_fn)(void *);
 typedef void(*drv_sched_log_fn)(const char *);
 
