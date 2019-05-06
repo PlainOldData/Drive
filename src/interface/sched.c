@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 
 /* ---------------------------------------------------------------- Config -- */
@@ -43,11 +44,17 @@
 #endif
 
 
+#ifndef DRV_PANIC_LOGGING
+#define DRV_PANIC_LOGGING 1
+#endif
+
+
 /* --------------------------------------------------- Thread Abstractions -- */
 /*
  * We use the OS's thread libs so a thin wrapper is used to cleanup the logic
  * in the code below.
  */
+
 
 #if defined(__linux__)
 #ifndef _GNU_SOURCE
@@ -81,17 +88,19 @@ typedef struct tagTHREADNAME_INFO {
 #error "Unsupported Platform"
 #endif
 
+
 #if defined(__linux__) || defined(__APPLE__)
 typedef pthread_t thread_t;
 typedef pthread_mutex_t mutex_t;
+typedef pthread_id_t thread_id_t;
 #elif defined(_WIN32)
-typedef HANDLE thread_t;
+typedef uintptr_t thread_t;
 typedef CRITICAL_SECTION mutex_t;
+typedef DWORD thread_id_t;
 #endif
 
 
-struct drv_signal
-{
+struct drv_signal {
         #if defined( _WIN32 )
         CRITICAL_SECTION mutex;
         CONDITION_VARIABLE condition;
@@ -105,11 +114,13 @@ struct drv_signal
 
 
 void
-drv_mutex_create(mutex_t *m) {
+drv_mutex_create(mutex_t *m)
+{
         #if defined(__linux__) || (__APPLE__)
         pthread_mutex_init(m, NULL);
         #elif defined(_WIN32)
-        InitializeCriticalSectionAndSpinCount(m, 32);
+        CRITICAL_SECTION *mut = (CRITICAL_SECTION*)m;
+        InitializeCriticalSectionAndSpinCount(mut, 32);
         #endif
 }
 
@@ -130,7 +141,8 @@ drv_mutex_lock(mutex_t *m)
         #if defined(__linux__) || defined(__APPLE__)
         pthread_mutex_lock((pthread_mutex_t*)m);
         #elif defined(_WIN32)
-        EnterCriticalSection((CRITICAL_SECTION*)m);
+        CRITICAL_SECTION *mut = (CRITICAL_SECTION*)m;
+        EnterCriticalSection(mut);
         #endif
 }
 
@@ -146,8 +158,9 @@ drv_mutex_unlock(mutex_t *m)
 }
 
 
-static int
-drv_physical_core_count() {
+int
+drv_physical_core_count()
+{
         int cpu_count = 0;
 
         #if defined(_WIN32)
@@ -165,8 +178,9 @@ drv_physical_core_count() {
 }
 
 
-static int
-drv_logical_core_count() {
+int
+drv_logical_core_count()
+{
         int cpu_count = 0;
 
         #ifdef _WIN32
@@ -202,8 +216,7 @@ struct drv_work {
 };
 
 
-struct drv_fiber
-{
+struct drv_fiber {
         void *stack;
         size_t sys_page_size;
         size_t stack_size;
@@ -215,6 +228,7 @@ struct drv_fiber
 
 
 struct drv_thread_arg {
+        thread_id_t thread_id;
         char name[64];
         fcontext_t home_context;
         struct drv_fiber *work_fiber;
@@ -224,6 +238,8 @@ struct drv_thread_arg {
 
 struct drv_sched_ctx {
         mutex_t mut;
+
+        thread_id_t main_thread;
 
         thread_t threads[DRV_SCHED_MAX_THREADS];
         struct drv_thread_arg thread_args[DRV_SCHED_MAX_THREADS];
@@ -238,6 +254,7 @@ struct drv_sched_ctx {
         uint32_t marker_instance;
         
         void* blocked[DRV_SCHED_MAX_BLOCKED_WORK];
+        int blocked_count;
         
         struct drv_fiber *free_fibers[DRV_SCHED_MAX_FIBERS];
         int free_fiber_count;
@@ -263,43 +280,84 @@ void
 drv_fiber_proc(
         void *arg)
 {
-        struct drv_thread_arg *fi_arg = (struct drv_thread_arg*)arg;
-        struct drv_sched_ctx *ctx = fi_arg->ctx;
+        int i;
+        struct drv_sched_ctx *ctx = (struct drv_thread_arg*)arg;
+
+        if(DRV_PANIC_LOGGING) {
+                printf("DRV Fiber Started\n");
+        }
         
         for(;;) {
-                struct drv_thread_arg *th_arg = (struct drv_thread_arg*)arg;
-                struct drv_fiber *fi = th_arg->work_fiber;
-        
-                drv_task_fn task =  fi->work_item.func;
-                void *arg = fi->work_item.arg;
+                if(DRV_PANIC_LOGGING) {
+                        printf("DRV Fiber Setup\n");
+                }
+
+                /* reaquire thread arg */
+                thread_id_t th_id = GetCurrentThreadId();
+
+                struct drv_thread_arg *th_arg = 0;
+
+                for(i = 0; i < ctx->thread_count; ++i) {
+                        if (ctx->thread_args[i].thread_id == th_id) {
+                                th_arg = &ctx->thread_args[i];
+                                break;
+                        }
+                }
                 
-                task(th_arg->ctx, arg);
+                struct drv_fiber *fi = th_arg->work_fiber;
+
+                if(DRV_PANIC_LOGGING) {
+                        printf("DRV Fiber %p Dispatching\n", fi);
+                }
         
+                /* run the task */
+                drv_task_fn task_fn = fi->work_item.func;
+                void *task_arg      = fi->work_item.arg;
+                
+                task_fn(th_arg->ctx, task_arg);
+
+                if(DRV_PANIC_LOGGING) {
+                        printf("DRV Fiber %p Job done\n", fi);
+                }
+                
+                /* update the marker */
+                drv_mutex_lock(&ctx->mut);
+                
+                uint64_t marker   = fi->work_item.marker;
+                uint32_t instance = (uint32_t)(marker & 0xFFFFFFFF);
+                uint32_t index    = (uint32_t)((marker >> 32) & 0xFFFFFFFF);
+                
+                struct drv_marker *mk = &ctx->markers[index];
+                assert(mk->instance == instance);
+                
+                mk->jobs_pending -= 1;
+
+                if(DRV_PANIC_LOGGING) {
+                        printf("DRV Marker %d counter dec %d / %d\n",
+                                instance,
+                                mk->jobs_pending,
+                                mk->jobs_enqueued);
+                }
+                
+                if(mk->jobs_pending == 0) {
+                        mk->instance = 0;
+                        mk->jobs_enqueued = 0;
+                        mk->jobs_pending = 0;
+                }
+
+                drv_mutex_unlock(&ctx->mut);
+                
                 /* switch back to thread proc */
                 fcontext_t *this_fi = &fi->context;
                 fcontext_t that_fi = th_arg->home_context;
-                
-                /* lock and update marker */
-                drv_mutex_lock(&ctx->mut);
-                
-                uint64_t marker = fi->work_item.marker;
-                uint32_t instance = (uint32_t)(marker & 0xFFFFFFFF);
-                uint32_t index = (uint32_t)((marker >> 32) & 0xFFFFFFFF);
-                
-                assert(ctx->markers[index].instance == instance);
-                ctx->markers[index].jobs_pending -= 1;
-                
-                if(ctx->markers[index].jobs_pending == 0) {
-                        ctx->markers[index].instance = 0;
+
+                if(DRV_PANIC_LOGGING) {
+                        printf("DRV Fiber %p Jump back to thread proc\n", fi);
                 }
-                
-                drv_mutex_unlock(&ctx->mut);
-                
+
                 jump_fcontext(this_fi, that_fi, NULL);
         }
 }
-
-#include <stdio.h>
 
 
 void*
@@ -307,9 +365,14 @@ drv_thread_proc(
         void *arg)
 {
         struct drv_thread_arg *th_arg = (struct drv_thread_arg*)arg;
+        th_arg->thread_id = GetCurrentThreadId();
         th_arg->home_context = NULL;
         struct drv_sched_ctx *ctx = th_arg->ctx;
-        
+
+        /* debug info */
+        int dispatched = 0;
+        int finished = 0;
+
         /* we have todo it like this because macOS's pthread doesn't take
          a thread id */
         if(strlen(th_arg->name)) {
@@ -333,11 +396,18 @@ drv_thread_proc(
                 __except(EXCEPTION_EXECUTE_HANDLER) {}
                 #endif
         }
-        
-        int this_tid = 123;
-        
+                
         /* search for a job */
         while(ctx->running) {
+                /* allow main thread to quit if work is done */
+                if(th_arg->thread_id == ctx->thread_args[0].thread_id) {
+                        if(ctx->free_fiber_count == DRV_SCHED_MAX_FIBERS &&
+                           ctx->work_count == 0 &&
+                           ctx->blocked_count == 0)
+                        {
+                                break;
+                        }
+                }
                 
                 /* look at pending jobs */
                 drv_mutex_lock(&ctx->mut);
@@ -350,7 +420,7 @@ drv_thread_proc(
                 for(i = 0; i < ctx->work_count; ++i) {
                         struct drv_work *w = &ctx->work[i];
                         
-                        if(w->tid == -1 || w->tid == this_tid) {
+                        if(w->tid == -1 || w->tid == th_arg->thread_id) {
                                 work = w;
                                 wk_idx = i;
                                 break;
@@ -364,6 +434,8 @@ drv_thread_proc(
                         if(ctx->free_fiber_count) {
                                 int fi_idx = ctx->free_fiber_count - 1;
                                 fi = ctx->free_fibers[fi_idx];
+
+                                ctx->free_fiber_count -= 1;
                         }
                         
                         if(!fi) {
@@ -396,17 +468,37 @@ drv_thread_proc(
                 /* jump into fiber proc */
                 fcontext_t *this_fi = &th_arg->home_context;
                 fcontext_t that_fi = fi->context;
-                jump_fcontext(this_fi, that_fi, th_arg);
+
+                dispatched += 1;
+
+                if(DRV_PANIC_LOGGING) {
+                        printf("DRV Thread %d Jump to Fiber %p\n",
+                                th_arg->thread_id,
+                                fi);
+                }
+
+                jump_fcontext(this_fi, that_fi, th_arg->ctx);
                 
                 /* jumped back to thread proc */
-                
+                finished += 1;
+
+                /* add fiber back to free queue */
+                /* reaquire fiber data as it might have changed in jumps */
+                fi = th_arg->work_fiber;
+                drv_mutex_lock(&ctx->mut);
+
+                int last_idx = ctx->free_fiber_count;
+                ctx->free_fibers[last_idx] = fi;
+                ctx->free_fiber_count += 1;
+
+                drv_mutex_unlock(&ctx->mut);
         }
         
         return 0;
 }
 
 
-static int
+int
 drv_sched_setup_threads(
         const struct drv_sched_ctx_create_desc *desc,
         struct drv_sched_ctx *ctx)
@@ -415,6 +507,7 @@ drv_sched_setup_threads(
         
         /* mutex */
         drv_mutex_create(&ctx->mut);
+        drv_mutex_lock(&ctx->mut);
         
         /* thread count */
         int th_count = desc->thread_count;
@@ -440,10 +533,13 @@ drv_sched_setup_threads(
                 /* copy thread name */
                 char *dst = ctx->thread_args[i].name;
                 const char *src = desc->thread_name;
-                int b_count = strlen(ctx->thread_args[i].name);
+                size_t b_count = strlen(ctx->thread_args[i].name);
                 strncat(dst, src, b_count - 1);
-                
         }
+
+
+        /* thread id for main thread */
+        ctx->main_thread = (thread_id_t)GetCurrentThreadId();
         
         /* create threads */
         for(i = 1; i < th_count; ++i) {
@@ -460,7 +556,7 @@ drv_sched_setup_threads(
                 
                 assert(success == 0 && "Failed to create thread");
                 #elif defined(_WIN32)
-                HANDLE th = _beginthreadex(
+                uintptr_t th = _beginthreadex(
                         NULL,
                         524288,
                         (_beginthreadex_proc_type)drv_thread_proc,
@@ -472,11 +568,14 @@ drv_sched_setup_threads(
                 #endif
                 
                 if(!th) {
+                        drv_mutex_unlock(&ctx->mut);
                         return 0;
                 }
                 
                 ctx->threads[i] = (thread_t)th;
         }
+
+        ctx->thread_count = th_count;
         
         /* thread affinity */
         if(desc->thread_pin == 1) {
@@ -499,9 +598,8 @@ drv_sched_setup_threads(
                 }
         }
         
+        drv_mutex_unlock(&ctx->mut);
         return 1;
-        
-
 }
 
 int
@@ -641,11 +739,11 @@ drv_sched_ctx_destroy(
         }
         
         struct drv_sched_ctx *ctx = *desc->ctx_to_destroy;
+        ctx->running = 0;
+
         int i;
         int th_count = ctx->thread_count;
-        
-        drv_mutex_lock(&ctx->mut);
-        
+                
         /* destroy threads */
         for(i = 1; i < th_count; ++i) {
                 if(!ctx->threads[i]) {
@@ -656,7 +754,7 @@ drv_sched_ctx_destroy(
                 pthread_t th = (pthread_t)ctx->threads[i];
                 pthread_join(th, 0);
                 #elif defined(_WIN32)
-                HANDLE th = (HANDLE)ctx->threads[i];
+                uintptr_t th = (HANDLE)ctx->threads[i];
                 WaitForSingleObject(th, INFINITE);
                 CloseHandle(th);
                 #endif
@@ -664,7 +762,6 @@ drv_sched_ctx_destroy(
                 ctx->threads[i] = 0;
         }
         
-        drv_mutex_unlock(&ctx->mut);
         drv_mutex_destroy(&ctx->mut);
         
         /* free if we have been asked to */
@@ -682,7 +779,24 @@ drv_sched_result
 drv_sched_ctx_join(
         struct drv_sched_ctx *ctx)
 {
-        return DRV_SCHED_RESULT_FAIL;
+        /* pedantic checks */
+        if(DRV_SCHED_PCHECKS && !ctx) {
+                assert(!"DRV_SCHED_RESULT_BAD_PARAM");
+                return DRV_SCHED_RESULT_BAD_PARAM;
+        }
+
+        if(DRV_SCHED_PCHECKS) {
+                thread_id_t this_id = (thread_id_t)GetCurrentThreadId();
+
+                if (this_id != ctx->main_thread) {
+                        assert(!"DRV_SCHED_RESULT_BAD_CALL");
+                        return DRV_SCHED_RESULT_BAD_CALL;
+                }
+        }
+
+        drv_thread_proc(&ctx->thread_args[0]);
+
+        return DRV_SCHED_RESULT_OK;
 }
 
 
@@ -793,30 +907,52 @@ drv_sched_wait(
                 assert(!"DRV_SCHED_RESULT_BAD_PARAM");
                 return DRV_SCHED_RESULT_BAD_PARAM;
         }
+
+        int i;
+
+        /* find thread */
+        thread_id_t self_id = GetCurrentThreadId();
+        int tls = -1;
+
+        for(i = 0; i < ctx->thread_count; ++i) {
+                if(ctx->thread_args[i].thread_id == tls) {
+                        tls = i;
+                        break;
+                };
+        };
         
-        
-        for(;;) {
-                int found = 1;
-        
+        /* block current task switch fiber back to thread_proc */
+        if(tls != -1) {
+                /* push fiber to blocked */
                 drv_mutex_lock(&ctx->mut);
 
-                uint32_t instance = (uint32_t)(wait_mk & 0xFFFFFFFF);
-                uint32_t index = (uint32_t)((wait_mk >> 32) & 0xFFFFFFFF);
-
-                if(ctx->markers[index].instance != instance) {
-                        found = 0;
-                }
-
                 drv_mutex_unlock(&ctx->mut);
+        }
+
+        /* thread not in pool so spin until marker is done */
+        else {
+                for(;;) {
+                        int found = 1;
+        
+                        drv_mutex_lock(&ctx->mut);
+
+                        uint32_t instance = (uint32_t)(wait_mk & 0xFFFFFFFF);
+                        uint32_t idx = (uint32_t)((wait_mk >> 32) & 0xFFFFFFFF);
+
+                        if(ctx->markers[idx].instance != instance) {
+                                found = 0;
+                        }
+
+                        drv_mutex_unlock(&ctx->mut);
                 
-                if(found) {
-                        sleep(10);
-                } else {
-                        break;
+                        if(found) {
+                                Sleep(10);
+                        } else {
+                                break;
+                        }
                 }
         }
-        
-        
+
         return DRV_SCHED_RESULT_OK;
 }
 
@@ -901,6 +1037,10 @@ drv_sched_profile_data_get(
         struct drv_sched_profile_data *out_data,
         int *out_count)
 {
+        (void)ctx;
+        (void)out_data;
+        (void)out_count;
+
         return DRV_SCHED_RESULT_FAIL;
 }
 

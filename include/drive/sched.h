@@ -18,6 +18,7 @@ typedef enum _drv_sched_result {
         DRV_SCHED_RESULT_BAD_PARAM,
         DRV_SCHED_RESULT_INVALID_DESC,
         DRV_SCHED_RESULT_OUT_OF_RESOURCES,
+        DRV_SCHED_RESULT_BAD_CALL,
         DRV_SCHED_RESULT_FAIL,
 } drv_sched_result;
 
@@ -25,7 +26,7 @@ typedef enum _drv_sched_result {
 /* -------------------------------------------------------------- Lifetime -- */
 
 
-typedef void*(*drv_sched_alloc_fn)(unsigned long);
+typedef void*(*drv_sched_alloc_fn)(size_t);
 typedef void(*drv_sched_free_fn)(void *);
 typedef void(*drv_sched_log_fn)(const char *);
 
@@ -69,6 +70,12 @@ drv_sched_ctx_destroy(
         struct drv_sched_ctx_destroy_desc *desc);        /* required */
 
 
+/*
+ * returns DRV_SCHED_RESULT_BAD_PARAM if ctx is null.
+ * returns DRV_SCHED_RESULT_FAIL on internal failure.
+ * returns DRV_SCHED_RESULT_BAD_CALL if not called on main thread.
+ * returns DRV_SCHED_RESULT_OK on success.
+ */
 drv_sched_result
 drv_sched_ctx_join(
         struct drv_sched_ctx *ctx);                      /* required */
