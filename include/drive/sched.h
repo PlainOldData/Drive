@@ -119,6 +119,11 @@ drv_sched_enqueue(
         uint64_t *out_batch_mk);                         /* optional */
 
 
+/*
+ * returns DRV_SCHED_RESULT_BAD_PARAM if ctx is null.
+ * returns DRV_SCHED_RESULT_FAIL on internal failure.
+ * returns DRV_SCHED_RESULT_OK on success.
+ */
 drv_sched_result
 drv_sched_wait(
         struct drv_sched_ctx *ctx,                       /* required */
@@ -161,7 +166,6 @@ typedef enum _drv_sys_detail {
  * returns DRV_SCHED_RESULT_FAIL on internal failure.
  * returns DRV_SCHED_RESULT_OK on success.
  */
-
 drv_sched_result
 drv_shed_sys_detail_get(
         drv_sys_detail detail,
@@ -170,8 +174,8 @@ drv_shed_sys_detail_get(
 
 /* -------------------------------------------------------------- Debuging -- */
 /*
- *  drv_sched can keep profiling information, you can use the OS's API to resolve
- *  the function ptr to a symbol name.
+ *  drv_sched can keep profiling information, you can use the OS's API to
+ *  resolve the function ptr to a symbol name.
  */
 
 
@@ -183,6 +187,13 @@ struct drv_sched_profile_data {
 };
 
 
+/*
+ * returns DRV_SCHED_RESULT_BAD_PARAM if ctx is null.
+ * returns DRV_SCHED_RESULT_BAD_PARAM if out_data is null.
+ * returns DRV_SCHED_RESULT_BAD_PARAM if out_count is null.
+ * returns DRV_SCHED_RESULT_FAIL on internal failure.
+ * returns DRV_SCHED_RESULT_OK on success.
+ */
 drv_sched_result
 drv_sched_profile_data_get(
         struct drv_sched_ctx *ctx,
