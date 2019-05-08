@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <errno.h>
 
 
 /* ---------------------------------------------------------------- Config -- */
@@ -45,7 +46,7 @@
 
 
 #ifndef DRV_PANIC_LOGGING
-#define DRV_PANIC_LOGGING 1
+#define DRV_PANIC_LOGGING 0
 #endif
 
 
@@ -101,7 +102,7 @@ typedef DWORD thread_id_t;
 
 
 struct drv_signal {
-        #if defined( _WIN32 )
+        #if defined(_WIN32)
         CRITICAL_SECTION mutex;
         CONDITION_VARIABLE condition;
         int value;
@@ -114,8 +115,102 @@ struct drv_signal {
 
 
 void
-drv_mutex_create(mutex_t *m)
-{
+drv_signal_create(struct drv_signal *signal) {
+        #if defined(_WIN32)
+        InitializeCriticalSectionAndSpinCount(&signal->mutex, 32);
+        InitializeConditionVariable(&signal->condition);
+        signal->value = 0;
+        #elif defined(__linux__) || defined(__APPLE__)
+        pthread_mutex_init(&signal->mutex, NULL);
+        pthread_cond_init(&signal->condition, NULL);
+        signal->value = 0;
+        #endif
+}
+
+void
+drv_signal_destroy(struct drv_signal *signal) {
+        #if defined(_WIN32)
+        DeleteCriticalSection(&signal->mutex);
+        #elif defined(__linux__) || defined(__APPLE__)
+        pthread_mutex_destroy(&signal->mutex);
+        pthread_cond_destroy(&signal->condition);
+        #endif
+}
+
+
+void
+drv_signal_raise(struct drv_signal *signal) {
+        #if defined(_WIN32)
+        EnterCriticalSection(&signal->mutex);
+        signal->value = 1;
+        LeaveCriticalSection(&signal->mutex);
+        WakeConditionVariable(&signal->condition);
+        #elif defined(__linux__) || defined(__APPLE__)
+        pthread_mutex_lock(&signal->mutex);
+        signal->value = 1;
+        pthread_mutex_unlock(&signal->mutex);
+        pthread_cond_signal(&signal->condition);
+        #endif
+}
+
+
+int
+drv_signal_wait(struct drv_signal *signal, int timeout_ms) {
+        #if defined( _WIN32 )
+        int timed_out = 0;
+        EnterCriticalSection(&signal->mutex);
+        while(signal->value == 0) {
+                int res = SleepConditionVariableCS(
+                        &signal->condition,
+                        &signal->mutex,
+                        timeout_ms < 0 ? INFINITE : timeout_ms);
+                
+                if (!res && GetLastError() == ERROR_TIMEOUT) {
+                        timed_out = 1; break;
+                }
+        }
+        if(!timed_out) {
+                signal->value = 0;
+        }
+        LeaveCriticalSection(&signal->mutex);
+        return !timed_out;
+        #elif defined(__linux__) || defined(__APPLE__)
+
+        struct timespec ts;
+        if(timeout_ms >= 0) {
+                struct timeval tv;
+                gettimeofday(&tv, NULL);
+                ts.tv_sec = time(NULL) + timeout_ms / 1000;
+                ts.tv_nsec = tv.tv_usec*1000+1000*1000*(timeout_ms%1000);
+                ts.tv_sec += ts.tv_nsec / (1000 * 1000 * 1000);
+                ts.tv_nsec %= (1000 * 1000 * 1000);
+        }
+
+        int timed_out = 0;
+        pthread_mutex_lock(&signal->mutex);
+        while(signal->value == 0) {
+                if(timeout_ms < 0) {
+                        pthread_cond_wait(&signal->condition, &signal->mutex);
+                }
+                else if(pthread_cond_timedwait(
+                        &signal->condition,
+                        &signal->mutex, &ts) == ETIMEDOUT)
+                {
+                        timed_out = 1;
+                        break;
+                }
+        }
+        if(!timed_out) {
+                signal->value = 0;
+        }
+        pthread_mutex_unlock(&signal->mutex);
+        return !timed_out;
+        #endif
+}
+
+
+void
+drv_mutex_create(mutex_t *m) {
         #if defined(__linux__) || (__APPLE__)
         pthread_mutex_init(m, NULL);
         #elif defined(_WIN32)
@@ -125,8 +220,7 @@ drv_mutex_create(mutex_t *m)
 }
 
 void
-drv_mutex_destroy(mutex_t *m)
-{
+drv_mutex_destroy(mutex_t *m) {
         #if defined(__linux__) || defined(__APPLE__)
         pthread_mutex_destroy((pthread_mutex_t*) m);
         #elif defined(_WIN32)
@@ -136,8 +230,7 @@ drv_mutex_destroy(mutex_t *m)
 
 
 void
-drv_mutex_lock(mutex_t *m)
-{
+drv_mutex_lock(mutex_t *m) {
         #if defined(__linux__) || defined(__APPLE__)
         pthread_mutex_lock((pthread_mutex_t*)m);
         #elif defined(_WIN32)
@@ -148,8 +241,7 @@ drv_mutex_lock(mutex_t *m)
 
 
 void
-drv_mutex_unlock(mutex_t *m)
-{
+drv_mutex_unlock(mutex_t *m) {
         #if defined(__linux__) || defined(__APPLE__)
         pthread_mutex_unlock((pthread_mutex_t*)m);
         #elif defined(_WIN32)
@@ -221,7 +313,7 @@ drv_logical_core_count()
 }
 
 
-/* ---------------------------------------------------- Drive sched Context -- */
+/* --------------------------------------------------- Drive sched Context -- */
 
 
 struct drv_marker {
@@ -234,8 +326,9 @@ struct drv_marker {
 struct drv_work {
         drv_task_fn func;
         void *arg;
-        int tid;
+        thread_id_t tid;
         uint64_t marker;
+        uint64_t blocked_mk;
 };
 
 
@@ -246,7 +339,14 @@ struct drv_fiber {
         fcontext_t context;
         void *arg;
 
+        uint64_t blocked_marker;
         struct drv_work work_item;
+};
+
+
+struct drv_blocked_work {
+        uint64_t marker;
+        struct drv_fiber *fiber;
 };
 
 
@@ -261,7 +361,8 @@ struct drv_thread_arg {
 
 struct drv_sched_ctx {
         mutex_t mut;
-
+        struct drv_signal work_signal;
+        
         thread_id_t main_thread;
 
         thread_t threads[DRV_SCHED_MAX_THREADS];
@@ -273,7 +374,6 @@ struct drv_sched_ctx {
         int work_count;
         
         struct drv_marker markers[DRV_SCHED_MAX_MARKERS];
-        int marker_count;
         uint32_t marker_instance;
         
         struct drv_fiber *blocked[DRV_SCHED_MAX_BLOCKED_WORK];
@@ -343,12 +443,24 @@ drv_fiber_proc(
                         printf("DRV Fiber %p Job done\n", fi);
                 }
                 
-                /* update the marker */
+                /* cleanup */
                 drv_mutex_lock(&ctx->mut);
                 
+                /* reaquire thread arg */
+                th_id = drv_thread_id_self();
+                th_arg = 0;
+
+                for(i = 0; i < ctx->thread_count; ++i) {
+                        if (ctx->thread_args[i].thread_id == th_id) {
+                                th_arg = &ctx->thread_args[i];
+                                break;
+                        }
+                }
+                
+                /* update the marker */
                 uint64_t marker   = fi->work_item.marker;
-                uint32_t instance = (uint32_t)(marker & 0xFFFFFFFF);
-                uint32_t index    = (uint32_t)((marker >> 32) & 0xFFFFFFFF);
+                uint64_t instance = (marker & 0xFFFFFFFF);
+                uint64_t index    = ((marker >> 32) & 0xFFFFFFFF);
                 
                 struct drv_marker *mk = &ctx->markers[index];
                 assert(mk->instance == instance);
@@ -357,7 +469,7 @@ drv_fiber_proc(
 
                 if(DRV_PANIC_LOGGING) {
                         printf("DRV Marker %d counter dec %d / %d\n",
-                                instance,
+                                (int)instance,
                                 mk->jobs_pending,
                                 mk->jobs_enqueued);
                 }
@@ -371,14 +483,15 @@ drv_fiber_proc(
                 drv_mutex_unlock(&ctx->mut);
                 
                 /* switch back to thread proc */
-                fcontext_t *this_fi = &fi->context;
-                fcontext_t that_fi = th_arg->home_context;
+                fcontext_t *fi_proc = &fi->context;
+                fcontext_t th_proc = th_arg->home_context;
 
                 if(DRV_PANIC_LOGGING) {
-                        printf("DRV Fiber %p Jump back to thread proc\n", fi);
+                        printf("DRV Fiber %p Jump back to thread proc\n",
+                                fi);
                 }
 
-                jump_fcontext(this_fi, that_fi, NULL);
+                jump_fcontext(fi_proc, th_proc, NULL);
         }
 }
 
@@ -390,6 +503,8 @@ drv_thread_proc(
         struct drv_thread_arg *th_arg = (struct drv_thread_arg*)arg;
         
         th_arg->thread_id = drv_thread_id_self();
+        thread_id_t this_tid = th_arg->thread_id;
+        
         th_arg->home_context = NULL;
         struct drv_sched_ctx *ctx = th_arg->ctx;
 
@@ -423,16 +538,24 @@ drv_thread_proc(
                 
         /* search for a job */
         while(ctx->running) {
+                struct drv_fiber *fiber_work = 0;
+        
                 /* allow main thread to quit if work is done */
-                if(drv_thread_id_equal(th_arg->thread_id, ctx->thread_args[0].thread_id)) {
+                drv_mutex_lock(&ctx->mut);
+                
+                thread_id_t main_tid = ctx->thread_args[0].thread_id;
+                
+                if(drv_thread_id_equal(this_tid, main_tid)) {
                         if(ctx->free_fiber_count == DRV_SCHED_MAX_FIBERS &&
                            ctx->work_count == 0 &&
                            ctx->blocked_count == 0)
                         {
+                                drv_mutex_unlock(&ctx->mut);
                                 break;
                         }
                 }
-                
+                drv_mutex_unlock(&ctx->mut);
+
                 int i;
                 
                 /* look at blocked jobs */
@@ -440,136 +563,173 @@ drv_thread_proc(
                 
                 int blocked = ctx->blocked_count;
                 
-                struct drv_fiber *blocked_fi = 0;
-                
-                for(i = 0; i < DRV_SCHED_MAX_BLOCKED_WORK; ++i) {
-                        if(ctx->blocked[i] == 0) {
-                                continue;
-                        }
-                
-                        uint64_t mk = ctx->blocked[i]->work_item.marker;
+                if(blocked) {
+                        for(i = 0; i < DRV_SCHED_MAX_BLOCKED_WORK; ++i) {
+                                if(ctx->blocked[i] == 0) {
+                                        continue;
+                                }
                         
-                        uint32_t instance = (uint32_t)(mk & 0xFFFFFFFF);
-                        uint32_t idx = (uint32_t)((mk >> 32) & 0xFFFFFFFF);
-                        
-                        if(ctx->markers[idx].instance != instance) {
+                                uint64_t mk = ctx->blocked[i]->blocked_marker;
+                                
+                                uint64_t instance = (mk & 0xFFFFFFFF);
+                                uint64_t idx = ((mk >> 32) & 0xFFFFFFFF);
+                                
+                                if(ctx->markers[idx].instance == instance) {
+                                        continue;
+                                }
+                                
+                                fiber_work = ctx->blocked[i];
+                                fiber_work->blocked_marker = 0;
+                                
+                                ctx->blocked[i] = 0;
+                                ctx->blocked_count -= 1;
+                                
                                 break;
                         }
-                        
-                        if(ctx->markers[idx].jobs_pending > 0) {
-                                break;
-                        }
-                        
-                        blocked_fi = ctx->blocked[i];
-                        ctx->blocked[i] = 0;
-                        ctx->blocked_count -= 1;
                 }
         
                 drv_mutex_unlock(&ctx->mut);
                 
-                if(blocked_fi) {
-                        th_arg->work_fiber = blocked_fi;
-                        
-                        /* continue work */
-                        fcontext_t *this_fi = &th_arg->home_context;
-                        fcontext_t that_fi = blocked_fi->context;
-
-                        if(DRV_PANIC_LOGGING) {
-                                printf("DRV Thread %d Jump to Fiber %p to continue\n",
-                                        th_arg->thread_id,
-                                        blocked_fi);
-                        }
-
-                        jump_fcontext(this_fi, that_fi, th_arg->ctx);
-                        
-                        /* and back */
-                        continue;
-                }
                 
                 /* look at pending jobs */
                 drv_mutex_lock(&ctx->mut);
                 
-                struct drv_work *work = 0;
-                int wk_idx = 0;
-                struct drv_fiber *fi = 0;
-                
-                for(i = 0; i < ctx->work_count; ++i) {
-                        struct drv_work *w = &ctx->work[i];
+                if(!fiber_work && ctx->work_count) {
+                        struct drv_work *work = 0;
+                        int wk_idx = 0;
                         
-                        if(w->tid == -1 || drv_thread_id_equal(w->tid, th_arg->thread_id)) {
+                        for(i = 0; i < ctx->work_count; ++i) {
+                                struct drv_work *w = &ctx->work[i];
+                                
+                                if(w->tid != 0) {
+                                        int th = drv_thread_id_equal(
+                                                w->tid,
+                                                this_tid);
+                                        
+                                        if(!th) {
+                                                continue;
+                                        }
+                                }
+                                
+                                uint64_t b_mk = w->blocked_mk;
+                                
+                                if(b_mk != 0) {
+                                        uint64_t instance = (b_mk & 0xFFFFFFFF);
+                                        uint64_t idx = ((b_mk >> 32) & 0xFFFFFFFF);
+                                        
+                                        if(ctx->markers[idx].instance == instance) {
+                                                continue;
+                                        }
+                                }
+                                
                                 work = w;
                                 wk_idx = i;
                                 break;
                         }
-                }
-                
-                /* look for fiber */
-                if(work) {
-                        assert(ctx->free_fiber_count);
                         
-                        if(ctx->free_fiber_count) {
-                                int fi_idx = ctx->free_fiber_count - 1;
-                                fi = ctx->free_fibers[fi_idx];
+                        /* look for fiber */
+                        if(work) {
+                                assert(ctx->free_fiber_count);
+                                
+                                if(ctx->free_fiber_count) {
+                                        int fi_idx = ctx->free_fiber_count - 1;
+                                        fiber_work = ctx->free_fibers[fi_idx];
 
-                                ctx->free_fiber_count -= 1;
+                                        ctx->free_fiber_count -= 1;
+                                }
+                                
+                                if(!fiber_work) {
+                                    assert(!"No fiber found.");
+                                }
+                        } else {
+                                drv_mutex_unlock(&ctx->mut);
+                                continue;
                         }
                         
-                        if(!fi) {
-                            assert(!"No fiber found.");
+                        if(work && !fiber_work) {
+                                drv_mutex_unlock(&ctx->mut);
+                                assert(0); /* likely gonna die */
+                                continue;
                         }
+                        
+                        /* remove work from queue */
+                        fiber_work->work_item = *work;
+                        fiber_work->blocked_marker = 0;
+                        th_arg->work_fiber = fiber_work;
+                        
+                        void *dst = &ctx->work[wk_idx];
+                        void *src = &ctx->work[wk_idx + 1];
+                        
+                        int size = sizeof(ctx->work) / sizeof(ctx->work[0]);
+                        int count = size - wk_idx - 1;
+                        int bytes = sizeof(ctx->work[0]) * count;
+                        
+                        memmove(dst, src, bytes);
+                        ctx->work_count -= 1;
                 }
-                
-                if(!work || !fi) {
-                        drv_mutex_unlock(&ctx->mut);
-                        /* sleep */
-                        continue;
-                }
-                
-                /* remove work from queue */
-                fi->work_item = *work;
-                th_arg->work_fiber = fi;
-                
-                void *dst = &ctx->work[wk_idx];
-                void *src = &ctx->work[wk_idx + 1];
-                
-                int size = sizeof(ctx->work) / sizeof(ctx->work[0]);
-                int count = size - wk_idx - 1;
-                int bytes = sizeof(ctx->work[0]) * count;
-                
-                memmove(dst, src, bytes);
-                ctx->work_count -= 1;
-                
                 drv_mutex_unlock(&ctx->mut);
                 
-                /* jump into fiber proc */
-                fcontext_t *this_fi = &th_arg->home_context;
-                fcontext_t that_fi = fi->context;
-
-                dispatched += 1;
-
-                if(DRV_PANIC_LOGGING) {
-                        printf("DRV Thread %d Jump to Fiber %p\n",
-                                th_arg->thread_id,
-                                fi);
-                }
-
-                jump_fcontext(this_fi, that_fi, th_arg->ctx);
+                /* jump into work */
+                if(fiber_work) {
+                        th_arg->work_fiber = fiber_work;
                 
-                /* jumped back to thread proc */
-                /* if not blocked we can add fiber back to free list */
-                if(th_arg->work_fiber) {
-                        finished += 1;
+                        /* jump into fiber proc */
+                        fcontext_t *th_proc = &th_arg->home_context;
+                        fcontext_t fi_proc = fiber_work->context;
 
-                        /* add fiber back to free queue */
-                        /* reaquire fiber data as it might have changed in jumps */
-                        fi = th_arg->work_fiber;
+                        dispatched += 1;
+
+                        if(DRV_PANIC_LOGGING) {
+                                printf("DRV Thread %d Jump to Fiber %p\n",
+                                        (int)this_tid,
+                                        fiber_work);
+                        }
+                        
+                        assert(fiber_work->blocked_marker == 0);
+        
+                        jump_fcontext(th_proc, fi_proc, th_arg->ctx);
+                        
+                        /* jumped back to thread proc - cleanup */
                         drv_mutex_lock(&ctx->mut);
+                        
+                        /* reaquire data as it might have changed in jumps */
+                        fiber_work = th_arg->work_fiber;
+                        
+                        /* if not blocked we can add fiber back to free list */
+                        if(!fiber_work->blocked_marker) {
+                                finished += 1;
 
-                        int last_idx = ctx->free_fiber_count;
-                        ctx->free_fibers[last_idx] = fi;
-                        ctx->free_fiber_count += 1;
-
+                                /* add fiber back to free queue */
+    
+                                int last_idx = ctx->free_fiber_count;
+                                ctx->free_fibers[last_idx] = fiber_work;
+                                ctx->free_fiber_count += 1;
+                                
+                                th_arg->work_fiber = 0;
+                        }
+                        else {
+                                /* push fiber to blocked queue */
+                                int count = ctx->blocked_count;
+                                assert(count < DRV_SCHED_MAX_BLOCKED_WORK);
+                        
+                                for(i = 0; i < DRV_SCHED_MAX_BLOCKED_WORK; ++i){
+                                        if(ctx->blocked[i] != 0) {
+                                                continue;
+                                        }
+                                        
+                                        ctx->blocked[i] = th_arg->work_fiber;
+                                        ctx->blocked_count += 1;
+                                        
+                                        break;
+                                }
+                                
+                                th_arg->work_fiber = 0;
+                        }
+                        
                         drv_mutex_unlock(&ctx->mut);
+                }
+                else {
+                        drv_signal_wait(&ctx->work_signal, 1000);
                 }
         }
         
@@ -583,6 +743,9 @@ drv_sched_setup_threads(
         struct drv_sched_ctx *ctx)
 {
         int i;
+        
+        /* new signal */
+        drv_signal_create(&ctx->work_signal);
         
         /* mutex */
         drv_mutex_create(&ctx->mut);
@@ -821,10 +984,13 @@ drv_sched_ctx_destroy(
         
         struct drv_sched_ctx *ctx = *desc->ctx_to_destroy;
         ctx->running = 0;
+        
+        /* poke sleeping threads so we can shutdown */
+        drv_signal_raise(&ctx->work_signal);
 
         int i;
         int th_count = ctx->thread_count;
-                
+        
         /* destroy threads */
         for(i = 1; i < th_count; ++i) {
                 if(!ctx->threads[i]) {
@@ -844,9 +1010,15 @@ drv_sched_ctx_destroy(
         }
         
         drv_mutex_destroy(&ctx->mut);
+        drv_signal_destroy(&ctx->work_signal);
         
-        /* free if we have been asked to */
+        /* destroy resources */
         if(desc->sched_free) {
+                /* fiber data */
+                for(i = 0; i < DRV_SCHED_MAX_FIBERS; ++i) {
+                        desc->sched_free(ctx->fibers[i].stack);
+                }
+        
                 desc->sched_free(*desc->ctx_to_destroy);
         }
         
@@ -925,8 +1097,21 @@ drv_sched_enqueue(
                 }
         }
         
-        /* new marker */
         int i;
+        
+        /* find thread */
+        thread_id_t th_id = drv_thread_id_self();
+        
+        struct drv_thread_arg *tls = 0;
+        
+        for(i = 0; i < ctx->thread_count; ++i) {
+                if(drv_thread_id_equal(ctx->thread_args[i].thread_id, th_id)) {
+                        tls = &ctx->thread_args[i];
+                        break;
+                };
+        };
+        
+        /* new marker */
         uint64_t index    = DRV_SCHED_MAX_MARKERS;
         uint32_t instance = ++ctx->marker_instance;
         
@@ -953,21 +1138,23 @@ drv_sched_enqueue(
         }
         
         /* insert work into the task queue */
-        int in_idx = ctx->work_count;
-        for(i = 0; i < desc->work_count; ++i, ++in_idx) {
-                drv_task_fn fn = desc->work[i].func;
-                void *arg = desc->work[i].arg;
-                int tid = desc->work[i].tid_lock ? 1 : -1;
+        int count = ctx->work_count;
+        for(i = 0; i < desc->work_count; ++i) {
+                drv_task_fn fn  = desc->work[i].func;
+                void *arg       = desc->work[i].arg;
+                thread_id_t tid = desc->work[i].tid_lock ? th_id : 0;
                 
                 /* insert work */
-                ctx->work[in_idx].marker = mk;
-                ctx->work[in_idx].arg    = arg;
-                ctx->work[in_idx].func   = fn;
-                ctx->work[in_idx].tid    = tid;
+                ctx->work[count + i].marker     = mk;
+                ctx->work[count + i].arg        = arg;
+                ctx->work[count + i].func       = fn;
+                ctx->work[count + i].tid        = tid;
+                ctx->work[count + i].blocked_mk = desc->blocked_mk;
         }
         
         ctx->work_count += desc->work_count;
         
+        drv_signal_raise(&ctx->work_signal);
         drv_mutex_unlock(&ctx->mut);
         
         return DRV_SCHED_RESULT_OK;
@@ -985,11 +1172,11 @@ drv_sched_wait(
                 return DRV_SCHED_RESULT_BAD_PARAM;
         }
         
-        if(DRV_SCHED_PCHECKS && !wait_mk) {
-                assert(!"DRV_SCHED_RESULT_BAD_PARAM");
-                return DRV_SCHED_RESULT_BAD_PARAM;
+        /* we allow null markers because it cleans up calling code */
+        if(wait_mk == 0) {
+                return DRV_SCHED_RESULT_OK;
         }
-
+        
         int i;
 
         /* find thread */
@@ -1006,37 +1193,18 @@ drv_sched_wait(
         
         /* block current task switch fiber back to thread_proc */
         if(tls) {
-                /* push fiber to blocked */
-                drv_mutex_lock(&ctx->mut);
-                
-                int count = ctx->blocked_count;
-                assert(count < DRV_SCHED_MAX_BLOCKED_WORK);
-                
-                if(count < DRV_SCHED_MAX_BLOCKED_WORK) {
-                        for(i = 0; i < DRV_SCHED_MAX_BLOCKED_WORK; ++i) {
-                                if(ctx->blocked[i] == 0) {
-                                        ctx->blocked[i] = tls->work_fiber;
-                                        ctx->blocked_count += 1;
-                                        break;
-                                }
-                        }
-                }
-                
-                drv_mutex_unlock(&ctx->mut);
-                
                 /* switch back to thread proc */
-                fcontext_t *this_fi = &tls->work_fiber->context;
-                fcontext_t that_fi = tls->home_context;
+                tls->work_fiber->blocked_marker = wait_mk;
+                
+                fcontext_t *fi_proc = &tls->work_fiber->context;
+                fcontext_t th_proc = tls->home_context;
 
                 if(DRV_PANIC_LOGGING) {
-                        printf("DRV Wait %p Jump back to thread proc\n", tls->work_fiber);
+                        printf("DRV Wait %p Jump back to thread proc\n",
+                                tls->work_fiber);
                 }
                 
-                tls->work_fiber = 0;
-
-                jump_fcontext(this_fi, that_fi, NULL);
-
-                
+                jump_fcontext(fi_proc, th_proc, NULL);
         }
 
         /* thread not in pool so spin until marker is done */
@@ -1046,8 +1214,8 @@ drv_sched_wait(
         
                         drv_mutex_lock(&ctx->mut);
 
-                        uint32_t instance = (uint32_t)(wait_mk & 0xFFFFFFFF);
-                        uint32_t idx = (uint32_t)((wait_mk >> 32) & 0xFFFFFFFF);
+                        uint64_t instance = (wait_mk & 0xFFFFFFFF);
+                        uint64_t idx = ((wait_mk >> 32) & 0xFFFFFFFF);
 
                         if(ctx->markers[idx].instance != instance) {
                                 found = 0;
@@ -1057,9 +1225,9 @@ drv_sched_wait(
                 
                         if(found) {
                                 #ifdef _WIN32
-                                Sleep(10);
+                                /*Sleep(10);*/
                                 #else
-                                sleep(100);
+                                /*sleep(100);*/
                                 #endif
                         } else {
                                 break;
