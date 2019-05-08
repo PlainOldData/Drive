@@ -674,7 +674,7 @@ simple()
 
 
 #ifndef BATCH_COUNT
-#define BATCH_COUNT 128
+#define BATCH_COUNT 1
 #endif
 
 
@@ -688,10 +688,10 @@ main()
         };
         
         test_data tests[] = {
-//                {"simple", simple},
-//                {"batch_and_join", batch_and_join},
-//                {"batch_and_wait", batch_and_wait},
-//                {"tid_locked", tid_locked},
+                {"simple", simple},
+                {"batch_and_join", batch_and_join},
+                {"batch_and_wait", batch_and_wait},
+                {"tid_locked", tid_locked},
                 {"deep_test", deep_test},
         };
         

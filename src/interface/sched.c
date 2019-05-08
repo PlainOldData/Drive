@@ -76,7 +76,7 @@
 #endif
 #include <windows.h>
 #include <process.h>
-const DWORD MS_VC_EXCEPTION = 0x406D1388;
+static const DWORD MS_VC_EXCEPTION = 0x406D1388;
 #pragma pack( push, 8 )
 typedef struct tagTHREADNAME_INFO {
         DWORD dwType;
@@ -774,7 +774,7 @@ drv_sched_setup_threads(
                 
                 /* copy thread name */
                 char *dst = ctx->thread_args[i].name;
-                const char *src = desc->thread_name;
+                const char *src = desc->thread_name ? desc->thread_name : "DRV";
                 size_t b_count = strlen(ctx->thread_args[i].name);
                 strncat(dst, src, b_count - 1);
         }
