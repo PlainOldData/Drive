@@ -1063,6 +1063,8 @@ drv_sched_enqueue(
         const struct drv_sched_enqueue_desc *desc,
         uint64_t *out_batch_mk)
 {
+        int i;
+
         /* pedantic checks */
         if(DRV_SCHED_PCHECKS && !ctx) {
                 assert(!"DRV_SCHED_RESULT_BAD_PARAM");
@@ -1083,6 +1085,15 @@ drv_sched_enqueue(
                 assert(!"DRV_SCHED_RESULT_INVALID_DESC");
                 return DRV_SCHED_RESULT_INVALID_DESC;
         }
+
+        if(DRV_SCHED_PCHECKS) {
+                for(i = 0; i < desc->work_count; ++i) {
+                        if(desc->work[i].func == 0) {
+                                assert(!"DRV_SCHED_RESULT_INVALID_DESC");
+                                return DRV_SCHED_RESULT_INVALID_DESC;
+                        }
+                }
+        }
         
         drv_mutex_lock(&ctx->mut);
         
@@ -1096,8 +1107,6 @@ drv_sched_enqueue(
                         return DRV_SCHED_RESULT_OUT_OF_RESOURCES;
                 }
         }
-        
-        int i;
         
         /* find thread */
         thread_id_t th_id = drv_thread_id_self();
