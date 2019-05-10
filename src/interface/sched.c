@@ -561,12 +561,22 @@ drv_thread_proc(
                 /* look at blocked jobs */
                 drv_mutex_lock(&ctx->mut);
                 
-                int blocked = ctx->blocked_count;
+                int blocked = !!ctx->blocked_count;
                 
                 if(blocked) {
                         for(i = 0; i < DRV_SCHED_MAX_BLOCKED_WORK; ++i) {
-                                if(ctx->blocked[i] == 0) {
+                                struct drv_fiber *bf = ctx->blocked[i];
+                        
+                                if(bf == 0) {
                                         continue;
+                                }
+                                
+                                thread_id_t tid = bf->work_item.tid;
+                                
+                                if(tid != 0) {
+                                        if(!drv_thread_id_equal(tid, this_tid)) {
+                                                continue;
+                                        }
                                 }
                         
                                 uint64_t mk = ctx->blocked[i]->blocked_marker;
