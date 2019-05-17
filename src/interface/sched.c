@@ -1360,6 +1360,110 @@ drv_sched_profile_data_get(
 }
 
 
+/* ------------------------------------------------------------------ Util -- */
+
+
+#define DRV_SPIN_LOCKED_ID 0xdeaf
+#define DRV_SPIN_UNLOCKED_ID 0xfeed
+
+
+void
+drv_spin_lock_init(
+        int *lock)
+{
+        #if defined(__clang__) || defined(__GNUC__)
+
+	/*
+	int ai_was = atomic->val;
+	__sync_val_compare_and_swap(&atomic->val, ai_was, val);
+	*/
+
+	/*
+  __sync_lock_test_and_set(&atomic->val, val);
+	__sync_lock_release(&atomic->val);
+	*/
+
+	/* So aligned writes are atomic right? */
+	*lock = DRV_SPIN_UNLOCKED_ID;
+
+	#elif defined(_WIN32)
+	InterlockedExchange((LONG*)lock, DRV_SPIN_UNLOCKED_ID);
+        #endif
+}
+
+
+void
+drv_spin_lock_aquire(
+        int *lock)
+{
+        while ((DRV_SPIN_LOCKED_ID == *lock) || (DRV_SPIN_LOCKED_ID == 
+        	#if defined(__clang__) || defined(__GNUC__)
+	        __sync_val_compare_and_swap(
+                        lock,
+                        DRV_SPIN_UNLOCKED_ID,
+                        DRV_SPIN_LOCKED_ID)
+	        #elif defined(_WIN32)
+                InterlockedCompareExchange(
+                        (LONG*)lock,
+                        DRV_SPIN_LOCKED_ID,
+                        DRV_SPIN_UNLOCKED_ID)
+                #endif
+                )) {
+                        #ifdef _WIN32
+                        _mm_pause();
+                        #endif
+                }
+}
+
+int
+drv_spin_lock_try_aquire(
+        int *lock)
+{
+        #if defined(__clang__) || defined(__GNUC__)
+	int lock_id = __sync_val_compare_and_swap(
+                lock,
+                DRV_SPIN_UNLOCKED_ID,
+                DRV_SPIN_LOCKED_ID);
+	#elif defined(_WIN32)
+        int lock_id = InterlockedCompareExchange(
+                (LONG*)lock,
+                DRV_SPIN_LOCKED_ID,
+                DRV_SPIN_UNLOCKED_ID);
+        #endif
+
+        if (lock_id == DRV_SPIN_UNLOCKED_ID) {
+                return 1;
+        }
+
+        return 0;
+}
+
+void
+drv_spin_lock_release(
+        int *lock)
+{
+        #if defined(__clang__) || defined(__GNUC__)
+
+	/*
+	int ai_was = atomic->val;
+	__sync_val_compare_and_swap(&atomic->val, ai_was, val);
+	*/
+
+	/*
+  __sync_lock_test_and_set(&atomic->val, val);
+	__sync_lock_release(&atomic->val);
+	*/
+
+	/* So aligned writes are atomic right? */
+	*lock = DRV_SPIN_UNLOCKED_ID;
+
+	#elif defined(_WIN32)
+	InterlockedExchange((LONG*)lock, DRV_SPIN_UNLOCKED_ID);
+#endif
+}
+
+
+
 /* ---------------------------------------------------------------- Config -- */
 
 
@@ -1370,3 +1474,5 @@ drv_sched_profile_data_get(
 #undef DRV_SCHED_MAX_FIBERS
 #undef DRV_SCHED_PCHECKS
 #undef DRV_SCHED_LOGGING
+#undef DRV_SPIN_LOCKED_ID
+#undef DRV_SPIN_UNLOCKED_ID

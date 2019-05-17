@@ -207,6 +207,39 @@ drv_sched_profile_data_get(
         int *out_count);
 
 
+/* ------------------------------------------------------------------ Util -- */
+/*
+ * Fibers can be woken up on different threads so a spinlock is a better choice.
+ * This might not be the best/fastest option depending on your platform.
+ */
+
+typedef union _drv_spin_lock {
+	void* align;
+	int val;
+} drv_spin_lock;
+
+
+void
+drv_spin_lock_init(
+        int *lock); /* required - aligned int, see `drv_spin_lock` */
+
+
+void
+drv_spin_lock_aquire(
+        int *lock); /* required - aligned int, see `drv_spin_lock` */
+
+/*
+ * returns 1 if a lock was aquired, 0 otherwise.
+ */
+int
+drv_spin_lock_try_aquire(
+        int *lock); /* required - aligned int, see `drv_spin_lock` */
+
+void
+drv_spin_lock_release(
+        int *lock); /* required - aligned int, see `drv_spin_lock` */
+
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

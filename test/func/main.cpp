@@ -6,10 +6,14 @@
 
 
 void
-drv_logging(const char *msg) {
-        printf("DRV SCHED: %s\n", msg);
-}
+drv_logging(drv_sched_log_type type, const char *msg, void *ud) {
+        (void)ud;
 
+        static const char *type_str[] = {"Error", "Warning", "Info"};
+        assert(type <= DRV_SCHED_LOG_INFO);
+        
+        printf("Sched - %s: %s\n", type_str[type], msg);
+}
 
 /* ----------------------------------------------------------------- Tests -- */
 /*
@@ -182,9 +186,8 @@ deep_test() {
         ctx_create_desc.thread_count  = 0;
         ctx_create_desc.thread_pin    = 0;
         ctx_create_desc.thread_name   = "Drive Deep Test Worker";
-        ctx_create_desc.sched_log     = nullptr;
         ctx_create_desc.sched_alloc   = malloc;
-        ctx_create_desc.sched_log     = drv_logging;
+        ctx_create_desc.log_fn        = drv_logging;
         
         success = drv_sched_ctx_create(&ctx_create_desc, &drv);
         
@@ -258,9 +261,8 @@ tid_locked()
         ctx_create_desc.thread_count  = 0;
         ctx_create_desc.thread_pin    = 0;
         ctx_create_desc.thread_name   = "Drive TID Test Worker";
-        ctx_create_desc.sched_log     = nullptr;
         ctx_create_desc.sched_alloc   = malloc;
-        ctx_create_desc.sched_log     = drv_logging;
+        ctx_create_desc.log_fn        = drv_logging;
         
         success = drv_sched_ctx_create(&ctx_create_desc, &drv);
         
@@ -382,9 +384,8 @@ batch_and_wait()
         ctx_create_desc.thread_count  = 0;
         ctx_create_desc.thread_pin    = 0;
         ctx_create_desc.thread_name   = "Drive Batch and Wait Test Worker";
-        ctx_create_desc.sched_log     = nullptr;
         ctx_create_desc.sched_alloc   = malloc;
-        ctx_create_desc.sched_log     = drv_logging;
+        ctx_create_desc.log_fn        = drv_logging;
         
         success = drv_sched_ctx_create(&ctx_create_desc, &drv);
         
@@ -510,9 +511,8 @@ batch_and_join()
         ctx_create_desc.thread_count  = 0;
         ctx_create_desc.thread_pin    = 0;
         ctx_create_desc.thread_name   = "Drive Batch Join Test Worker";
-        ctx_create_desc.sched_log     = nullptr;
         ctx_create_desc.sched_alloc   = malloc;
-        ctx_create_desc.sched_log     = drv_logging;
+        ctx_create_desc.log_fn        = drv_logging;
         
         success = drv_sched_ctx_create(&ctx_create_desc, &drv);
         
@@ -602,9 +602,8 @@ simple()
         ctx_create_desc.thread_count  = 0;
         ctx_create_desc.thread_pin    = 0;
         ctx_create_desc.thread_name   = "Drive Simple Test Worker";
-        ctx_create_desc.sched_log     = nullptr;
         ctx_create_desc.sched_alloc   = malloc;
-        ctx_create_desc.sched_log     = drv_logging;
+        ctx_create_desc.log_fn        = drv_logging;
         
         success = drv_sched_ctx_create(&ctx_create_desc, &drv);
         

@@ -71,6 +71,10 @@ drv_mem_allocate(
         unsigned bytes,
         void **out)
 {
+        (void)ctx;
+        (void)bytes;
+        (void)out;
+
         return DRV_MEM_RESULT_FAIL;
 }
 
@@ -80,6 +84,9 @@ drv_mem_free(
         struct drv_mem_ctx *ctx,
         void *addr)
 {
+        (void)ctx;
+        (void)addr;
+
         return DRV_MEM_RESULT_FAIL;
 }
 
@@ -93,6 +100,10 @@ drv_mem_stack_allocator_create(
         struct drv_mem_stack_allocator_desc *desc,
         uint64_t *allocator_id)
 {
+        (void)ctx;
+        (void)desc;
+        (void)allocator_id;
+
         return DRV_MEM_RESULT_FAIL;
 }
 
@@ -103,6 +114,10 @@ drv_mem_stack_alloc(
         uint64_t alloc_id,
         unsigned bytes)
 {
+        (void)ctx;
+        (void)alloc_id;
+        (void)bytes;
+
         return DRV_MEM_RESULT_FAIL;
 }
 
@@ -112,6 +127,9 @@ drv_mem_stack_free(
         struct drv_mem_ctx *ctx,
         uint64_t alloc_id)
 {
+        (void)ctx;
+        (void)alloc_id;
+
         return DRV_MEM_RESULT_FAIL;
 }
 
@@ -125,6 +143,10 @@ drv_mem_tagged_allocator_create(
         struct drv_mem_tagged_allocator_desc *desc,
         uint64_t *allocator_id)
 {
+        (void)ctx;
+        (void)desc;
+        (void)allocator_id;
+
         return DRV_MEM_RESULT_FAIL;
 }
 
@@ -136,6 +158,11 @@ drv_mem_tagged_alloc(
         uint64_t tag_id,
         unsigned bytes)
 {
+        (void)ctx;
+        (void)alloc_id;
+        (void)tag_id;
+        (void)bytes;
+
         return DRV_MEM_RESULT_FAIL;
 }
 
@@ -146,6 +173,10 @@ drv_mem_tagged_free(
         uint64_t alloc_id,
         uint64_t tag_id)
 {
+        (void)ctx;
+        (void)alloc_id;
+        (void)tag_id;
+
         return DRV_MEM_RESULT_FAIL;
 }
 
