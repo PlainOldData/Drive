@@ -962,15 +962,15 @@ drv_sched_ctx_create(
         
         /* failed to create context backing out */
         DRV_FAILED_SETUP: {
-                drv_sched_result success = DRV_SCHED_RESULT_OK;
+                drv_sched_result sched_ok = DRV_SCHED_RESULT_OK;
                 
                 struct drv_sched_ctx_destroy_desc destroy_desc = {0};
                 destroy_desc.ctx_to_destroy = &new_ctx;
                 destroy_desc.sched_free = 0; /* not our job to free */
                 
-                success = drv_sched_ctx_destroy(&destroy_desc);
+                sched_ok = drv_sched_ctx_destroy(&destroy_desc);
                 
-                assert(success == DRV_SCHED_RESULT_OK && "DRV_SCHED_RESULT_OK");
+                assert(sched_ok == DRV_SCHED_RESULT_OK && "DRV_SCHED_RESULT_OK");
                 
                 return DRV_SCHED_RESULT_FAIL;
         }
@@ -1011,9 +1011,9 @@ drv_sched_ctx_destroy(
                 pthread_t th = (pthread_t)ctx->threads[i];
                 pthread_join(th, 0);
                 #elif defined(_WIN32)
-                uintptr_t th = (HANDLE)ctx->threads[i];
-                WaitForSingleObject(th, INFINITE);
-                CloseHandle(th);
+                HANDLE th = (HANDLE)ctx->threads[i];
+                WaitForSingleObject((HANDLE)th, INFINITE);
+                CloseHandle((HANDLE)th);
                 #endif
                 
                 ctx->threads[i] = 0;
