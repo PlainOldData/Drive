@@ -76,7 +76,7 @@
 #endif
 #include <windows.h>
 #include <process.h>
-const DWORD MS_VC_EXCEPTION = 0x406D1388;
+static const DWORD MS_VC_EXCEPTION = 0x406D1388;
 #pragma pack( push, 8 )
 typedef struct tagTHREADNAME_INFO {
         DWORD dwType;
@@ -561,12 +561,22 @@ drv_thread_proc(
                 /* look at blocked jobs */
                 drv_mutex_lock(&ctx->mut);
                 
-                int blocked = ctx->blocked_count;
+                int blocked = !!ctx->blocked_count;
                 
                 if(blocked) {
                         for(i = 0; i < DRV_SCHED_MAX_BLOCKED_WORK; ++i) {
-                                if(ctx->blocked[i] == 0) {
+                                struct drv_fiber *bf = ctx->blocked[i];
+                        
+                                if(bf == 0) {
                                         continue;
+                                }
+                                
+                                thread_id_t tid = bf->work_item.tid;
+                                
+                                if(tid != 0) {
+                                        if(!drv_thread_id_equal(tid, this_tid)) {
+                                                continue;
+                                        }
                                 }
                         
                                 uint64_t mk = ctx->blocked[i]->blocked_marker;
@@ -774,7 +784,7 @@ drv_sched_setup_threads(
                 
                 /* copy thread name */
                 char *dst = ctx->thread_args[i].name;
-                const char *src = desc->thread_name;
+                const char *src = desc->thread_name ? desc->thread_name : "DRV";
                 size_t b_count = strlen(ctx->thread_args[i].name);
                 strncat(dst, src, b_count - 1);
         }
@@ -1063,6 +1073,8 @@ drv_sched_enqueue(
         const struct drv_sched_enqueue_desc *desc,
         uint64_t *out_batch_mk)
 {
+        int i;
+
         /* pedantic checks */
         if(DRV_SCHED_PCHECKS && !ctx) {
                 assert(!"DRV_SCHED_RESULT_BAD_PARAM");
@@ -1083,6 +1095,15 @@ drv_sched_enqueue(
                 assert(!"DRV_SCHED_RESULT_INVALID_DESC");
                 return DRV_SCHED_RESULT_INVALID_DESC;
         }
+
+        if(DRV_SCHED_PCHECKS) {
+                for(i = 0; i < desc->work_count; ++i) {
+                        if(desc->work[i].func == 0) {
+                                assert(!"DRV_SCHED_RESULT_INVALID_DESC");
+                                return DRV_SCHED_RESULT_INVALID_DESC;
+                        }
+                }
+        }
         
         drv_mutex_lock(&ctx->mut);
         
@@ -1096,8 +1117,6 @@ drv_sched_enqueue(
                         return DRV_SCHED_RESULT_OUT_OF_RESOURCES;
                 }
         }
-        
-        int i;
         
         /* find thread */
         thread_id_t th_id = drv_thread_id_self();
