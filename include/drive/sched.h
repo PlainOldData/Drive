@@ -26,11 +26,7 @@ typedef enum _drv_sched_result {
 /* -------------------------------------------------------------- Lifetime -- */
 
 
-#ifdef WIN32
 typedef void*(*drv_sched_alloc_fn)(size_t);
-#else
-typedef void*(*drv_sched_alloc_fn)(unsigned long);
-#endif
 typedef void(*drv_sched_free_fn)(void *);
 typedef void(*drv_sched_log_fn)(const char *);
 
@@ -39,8 +35,8 @@ struct drv_sched_ctx_create_desc {
         int thread_count;               /* if 0 - then count = (cores - 2) */
         int thread_pin;                 /* if 1 - then set thread affinity */
         const char *thread_name;        /* set name of thread */
-        drv_sched_alloc_fn sched_alloc;   /* required */
-        drv_sched_log_fn sched_log;           /* optional - must be built with DRV_SCHED_LOGGING = 1*/
+        drv_sched_alloc_fn sched_alloc; /* required */
+        drv_sched_log_fn sched_log;     /* optional - buit with DRV_SCHED_LOGGING = 1 */
 };
 
 
@@ -58,7 +54,7 @@ drv_sched_ctx_create(
 
 
 struct drv_sched_ctx_destroy_desc {
-        drv_sched_free_fn sched_free;                     /* optional */
+        drv_sched_free_fn sched_free;                    /* optional */
         struct drv_sched_ctx **ctx_to_destroy;           /* required */
 };
 
@@ -99,9 +95,9 @@ struct drv_sched_work_desc {
 
 
 struct drv_sched_enqueue_desc {
-        struct drv_sched_work_desc *work;                /* required */
-        int work_count;                                 /* required - must be greater than 0 */
-        uint64_t blocked_mk;                            /* optional - zero if none */
+        struct drv_sched_work_desc *work; /* required */
+        int work_count;                   /* required - must be > 0 */
+        uint64_t blocked_mk;              /* optional - zero if none */
 };
 
 /*
