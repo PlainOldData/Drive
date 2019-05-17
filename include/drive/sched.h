@@ -3,6 +3,7 @@
 
 
 #include <stdint.h>
+#include <stddef.h>
 
 
 #ifdef __cplusplus
@@ -26,21 +27,26 @@ typedef enum _drv_sched_result {
 /* -------------------------------------------------------------- Lifetime -- */
 
 
-#ifdef _WIN32
+typedef enum _drv_sched_log_type {
+        DRV_SCHED_LOG_ERROR = 0,
+        DRV_SCHED_LOG_WARNING = 1,
+        DRV_SCHED_LOG_INFO = 2,
+} drv_sched_log_type;
+
+
 typedef void*(*drv_sched_alloc_fn)(size_t);
-#else
-typedef void*(*drv_sched_alloc_fn)(unsigned long);
-#endif
 typedef void(*drv_sched_free_fn)(void *);
-typedef void(*drv_sched_log_fn)(const char *);
+typedef void(*drv_sched_log_fn)(drv_sched_log_type, const char *, void*);
 
 
 struct drv_sched_ctx_create_desc {
         int thread_count;               /* if 0 - then count = (cores - 2) */
         int thread_pin;                 /* if 1 - then set thread affinity */
         const char *thread_name;        /* set name of thread */
-        drv_sched_alloc_fn sched_alloc;   /* required */
-        drv_sched_log_fn sched_log;           /* optional - must be built with DRV_SCHED_LOGGING = 1*/
+        drv_sched_alloc_fn sched_alloc; /* required */
+        drv_sched_log_fn log_fn;        /* optional - buit with DRV_SCHED_LOGGING = 1 */
+        void *log_ud;                   /* optional - passed to logging cb */
+        drv_sched_log_type log_level;   /* 0 for only errors, 1 for warnings and errors, 2 for warnings errors, and info */
 };
 
 
@@ -58,7 +64,7 @@ drv_sched_ctx_create(
 
 
 struct drv_sched_ctx_destroy_desc {
-        drv_sched_free_fn sched_free;                     /* optional */
+        drv_sched_free_fn sched_free;                    /* optional */
         struct drv_sched_ctx **ctx_to_destroy;           /* required */
 };
 
@@ -99,9 +105,9 @@ struct drv_sched_work_desc {
 
 
 struct drv_sched_enqueue_desc {
-        struct drv_sched_work_desc *work;                /* required */
-        int work_count;                                 /* required - must be greater than 0 */
-        uint64_t blocked_mk;                            /* optional - zero if none */
+        struct drv_sched_work_desc *work; /* required */
+        int work_count;                   /* required - must be > 0 */
+        uint64_t blocked_mk;              /* optional - zero if none */
 };
 
 /*

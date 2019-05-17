@@ -10,6 +10,9 @@ extern "C" {
 #endif
 
 
+struct drv_plat_ctx; /* opaque */
+
+
 /* ----------------------------------------------------------- Identifiers -- */
 
 
@@ -30,17 +33,72 @@ typedef enum _drv_plat_event {
 
 /* -------------------------------------------------------------- Lifetime -- */
 
-/* -------------------------------------------------------------- Monitors -- */
+
+typedef enum _drv_plat_gpu_device {
+        DRV_PLAT_GPU_DEVICE_DX12,
+        DRV_PLAT_GPU_DEVICE_VULKAN,
+        DRV_PLAT_GPU_DEVICE_GL,
+} drv_plat_gpu_device;
+
+
+struct drv_plat_ctx_create_desc {
+        drv_plat_gpu_device gpu_device;
+};
+
+
+drv_plat_result
+drv_plat_ctx_create(
+        const struct drv_plat_ctx_create_desc *desc,
+        struct drv_plat_ctx **out);
+
+
+drv_plat_result
+drv_plat_ctx_destroy();
+
+
+/* ---------------------------------------------------------------- Events -- */
+
+
+drv_plat_result
+drv_plat_event_poll(
+        struct drv_plat_ctx *ctx,
+        uint64_t *out_events);
+
 
 /* ---------------------------------------------------------------- Window -- */
 
 
-struct drv_plat_window_desc {
-        uint32_t flags;
-};
+drv_plat_result
+drv_plat_window(
+        struct drv_plat_ctx *ctx);
 
 
 /* ----------------------------------------------------------------- Input -- */
+
+
+struct drv_keyboard_get_desc {
+        int keyboard_id;
+};
+
+
+drv_plat_result
+drv_plat_keyboard_get(
+        struct drv_plat_ctx *ctx,
+        uint8_t **out_key_state,
+        int *out_key_count);
+
+
+struct drv_mouse_get_desc {
+        int mouse_id;
+};
+
+
+drv_plat_result
+drv_plat_keyboard_get(
+        struct drv_plat_ctx *ctx,
+        uint8_t **out_key_state,
+        int *out_key_count);
+
 
 
 #ifdef __cplusplus
