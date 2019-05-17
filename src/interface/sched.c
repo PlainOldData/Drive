@@ -192,9 +192,16 @@ drv_signal_wait(struct drv_signal *signal, int timeout_ms) {
                 if(timeout_ms < 0) {
                         pthread_cond_wait(&signal->condition, &signal->mutex);
                 }
-                else if(pthread_cond_timedwait(
+                
+                int ret = pthread_cond_timedwait(
                         &signal->condition,
-                        &signal->mutex, &ts) == ETIMEDOUT)
+                        &signal->mutex, &ts);
+                
+                int i = EINVAL;
+                int j = EINVAL;
+                int k = EPERM;
+                
+                if(ret == ETIMEDOUT)
                 {
                         timed_out = 1;
                         break;
@@ -386,13 +393,18 @@ struct drv_sched_ctx {
         
         int running;
 
+        /* logging */
         drv_sched_log_fn log_fn;
+        drv_sched_log_type log_level;
+        void *log_ud;
 };
 
 
 void
-drv_dummy_log(const char *msg) {
+drv_dummy_log(drv_sched_log_type type, const char *msg, void *ud) {
+        (void)type;
         (void)msg;
+        (void)ud;
 }
 
 
@@ -739,7 +751,7 @@ drv_thread_proc(
                         drv_mutex_unlock(&ctx->mut);
                 }
                 else {
-                        drv_signal_wait(&ctx->work_signal, 1000);
+                        drv_signal_wait(&ctx->work_signal, 2000);
                 }
         }
         
@@ -772,10 +784,10 @@ drv_sched_setup_threads(
                 th_count = 2;
         }
         
-        if(DRV_SCHED_LOGGING) {
+        if(DRV_SCHED_LOGGING && ctx->log_level >= DRV_SCHED_LOG_INFO) {
                 char buf[256];
                 snprintf(buf, sizeof(buf), "Create %d threads", th_count);
-                ctx->log_fn(&buf[0]);
+                ctx->log_fn(DRV_SCHED_LOG_INFO, &buf[0], ctx->log_ud);
         }
         
         /* setup thread args */
@@ -833,10 +845,10 @@ drv_sched_setup_threads(
         
         /* thread affinity */
         if(desc->thread_pin == 1) {
-                if(DRV_SCHED_LOGGING) {
+                if(DRV_SCHED_LOGGING && ctx->log_level >= DRV_SCHED_LOG_INFO) {
                         char buf[128];
                         snprintf(buf, sizeof(buf), "Lock threads to cores");
-                        ctx->log_fn(&buf[0]);
+                        ctx->log_fn(DRV_SCHED_LOG_INFO, &buf[0], ctx->log_ud);
                 }
                 
                 for(i = 0; i < th_count; ++i) {
@@ -927,8 +939,10 @@ drv_sched_ctx_create(
         struct drv_sched_ctx *new_ctx = alloc;
         
         /* logging */
-        if(DRV_SCHED_LOGGING && desc->sched_log) {
-                new_ctx->log_fn = desc->sched_log;
+        if(DRV_SCHED_LOGGING && desc->log_fn) {
+                new_ctx->log_fn = desc->log_fn;
+                new_ctx->log_ud = desc->log_ud;
+                new_ctx->log_level = desc->log_level;
         }
         else if(DRV_SCHED_LOGGING) {
                 new_ctx->log_fn = drv_dummy_log;

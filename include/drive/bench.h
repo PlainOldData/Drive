@@ -1,8 +1,9 @@
-#ifndef DRV_BENCH_INCLUDED_
-#define DRV_BENCH_INCLUDED_
+#ifndef DRV_BENCH_INCLUDED_0D71CD17_BF04_4499_A8F3_FF99BF7266BD
+#define DRV_BENCH_INCLUDED_0D71CD17_BF04_4499_A8F3_FF99BF7266BD
 
 
 #include <stdint.h>
+#include <stddef.h>
 
 
 #ifdef __cplusplus
@@ -19,6 +20,17 @@ typedef enum _drv_bench_result {
         DRV_BENCH_RESULT_INVALID_DESC,
         DRV_BENCH_RESULT_FAIL,
 } drv_bench_result;
+
+
+typedef enum _drv_bench_event_id {
+        DRV_BENCH_EVENT_ID_START,
+        DRV_BENCH_EVENT_ID_END,
+} drv_bench_event_id;
+
+
+typedef enum _drv_bench_event_flags {
+        DRV_BENCH_EVENT_EXTRA_TO_SYMBOL_NAME = 1 << 0,
+} drv_bench_event_flags;
 
 
 struct drv_bench_info {
@@ -40,9 +52,9 @@ typedef void(*drv_bench_free_fn)(void *);
 
 
 struct drv_bench_create_ctx_desc {
-        struct drv_bench_info *ring_buf;/* required to not be null */
-        size_t ring_buff_size;          /* required to be > 0 */
-        drv_bench_alloc_fn alloc;       /* required */
+        struct drv_bench_info *ring_buf; /* required to not be null */
+        size_t ring_buf_size;            /* required to be > 0 */
+        drv_bench_alloc_fn alloc;        /* required */
 };
 
 
@@ -75,17 +87,6 @@ drv_bench_ctx_destroy(
 
 
 /* --------------------------------------------------------- Add new bench -- */
-
-
-typedef enum _drv_bench_event_id {
-        DRV_BENCH_EVENT_ID_START,
-        DRV_BENCH_EVENT_ID_END,
-} drv_bench_event_id;
-
-
-typedef enum _drv_bench_flags {
-        DRV_BENCH_FLAG_EXTRA_TO_SYMBOL_NAME = 1 << 0,
-} drv_bench_flags;
 
 
 /*
@@ -128,7 +129,7 @@ struct drv_bench_to_trace {
 drv_bench_result
 drv_bench_convert_to_trace(
         struct drv_bench_ctx *ctx,
-        const struct drv_bench_to_trace *desc)
+        const struct drv_bench_to_trace *desc);
 
 
 #ifdef __cplusplus
