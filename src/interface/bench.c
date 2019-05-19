@@ -135,9 +135,11 @@ drv_bench_ctx_create(
         ctx->size = desc->ring_buf_size;
         ctx->info = desc->ring_buf;
 
+        #ifdef _WIN32
         struct _timeb timebuffer;
         _ftime64_s(&timebuffer);
         ctx->start_ts = (uint64_t)((timebuffer.time * 1000L) + timebuffer.millitm);
+        #endif
         
         *out = ctx;
 
@@ -182,9 +184,11 @@ drv_bench_event_new(
         int idx = drv_atomic_int_inc(&ctx->index);
         idx = idx % ctx->size;
 
+        #ifdef _WIN32
         struct _timeb timebuffer;
         _ftime64_s(&timebuffer);
         uint64_t ts = (uint64_t)((timebuffer.time * 1000L) + timebuffer.millitm);
+        #endif
 
         ctx->info[idx].ts = ts - ctx->start_ts;
 
