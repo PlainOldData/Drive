@@ -704,7 +704,7 @@ main()
                         int result = t.func();
                         
                         if(result != 1) {
-                                fprintf(stderr, "Test Failed %s", t.name);
+                                fprintf(stderr, "Sched Test Failed %s", t.name);
                                 return EXIT_FAILURE;
                         }
                 }

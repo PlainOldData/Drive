@@ -140,6 +140,7 @@ drv_bench_ctx_create(
         struct _timeb tb;
         _ftime64_s(&tb);
         uint64_t ts = (uint64_t)((tb.time * 1000L) + tb.millitm);
+        ctx->start_ts = ts;
         #endif
         
         *out = ctx;
@@ -235,7 +236,9 @@ drv_bench_convert_to_trace(
         int pid = (int)GetCurrentProcessId();
         #endif
         
+        #if defined(__APPLE__) || (__linux__)
         int pid = 0;
+        #endif
 
         fprintf(f, "{\n\t\"traceEvents\": [\n");
 

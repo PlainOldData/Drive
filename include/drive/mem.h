@@ -22,15 +22,20 @@ typedef enum _drv_mem_result {
 } drv_mem_result;
 
 
+typedef enum _drv_mem_alloc_type {
+        DRV_MEM_ALLOC_TYPE_PHYSICAL,
+        DRV_MEM_ALLOC_TYPE_VIRTUAL,
+} drv_mem_alloc_type;
+
+
 /* -------------------------------------------------------------- Lifetime -- */
 
 
-typedef void*(*drv_mem_alloc_fn)(unsigned long);
+typedef void*(*drv_mem_alloc_fn)(size_t);
 typedef void(*drv_mem_free_fn)(void *);
 
 
 struct drv_mem_ctx_create_desc {
-        unsigned max_bytes;  /* must be greater than zero */
         drv_mem_alloc_fn alloc_fn; /* default malloc */
         drv_mem_free_fn free_fn; /* default free */
 };
@@ -53,7 +58,7 @@ drv_mem_ctx_destroy(
 drv_mem_result
 drv_mem_allocate(
         struct drv_mem_ctx *ctx,
-        unsigned bytes,
+        size_t bytes,
         void **out);
 
 
@@ -68,7 +73,7 @@ drv_mem_free(
 
 struct drv_mem_stack_allocator_desc {
         unsigned size_of_stack;
-        int ring_buffer;
+        drv_mem_alloc_type alloc_type;
 };
 
 
