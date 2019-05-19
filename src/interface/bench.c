@@ -26,6 +26,7 @@ typedef pthread_mutex_t drv_mutex;
 #endif
 #include <windows.h>
 #include <sys/timeb.h>
+#include <DbgHelp.h>
 typedef CRITICAL_SECTION drv_mutex;
 #endif
 
@@ -61,7 +62,7 @@ drv_atomic_int_store(
         */
 
         /*
-  __sync_lock_test_and_set(&atomic->val, val);
+        __sync_lock_test_and_set(&atomic->val, val);
         __sync_lock_release(&atomic->val);
         */
 
@@ -136,9 +137,9 @@ drv_bench_ctx_create(
         ctx->info = desc->ring_buf;
 
         #ifdef _WIN32
-        struct _timeb timebuffer;
-        _ftime64_s(&timebuffer);
-        ctx->start_ts = (uint64_t)((timebuffer.time * 1000L) + timebuffer.millitm);
+        struct _timeb tb;
+        _ftime64_s(&tb);
+        uint64_t ts = (uint64_t)((tb.time * 1000L) + tb.millitm);
         #endif
         
         *out = ctx;
@@ -185,12 +186,12 @@ drv_bench_event_new(
         idx = idx % ctx->size;
 
         #ifdef _WIN32
-        struct _timeb timebuffer;
-        _ftime64_s(&timebuffer);
-        uint64_t ts = (uint64_t)((timebuffer.time * 1000L) + timebuffer.millitm);
-        #endif
-
+        struct _timeb tb;
+        _ftime64_s(&tb);
+        uint64_t ts = (uint64_t)((tb.time * 1000L) + tb.millitm);
+        
         ctx->info[idx].ts = ts - ctx->start_ts;
+        #endif
 
         return &ctx->info[idx];
 }
@@ -217,9 +218,6 @@ drv_bench_event_fetch(
 /* --------------------------------------------------------------- Convert -- */
 
 
-#include <DbgHelp.h>
-
-
 drv_bench_result
 drv_bench_convert_to_trace(
         struct drv_bench_ctx *ctx,
@@ -234,16 +232,17 @@ drv_bench_convert_to_trace(
         #ifdef _WIN32
         SymSetOptions(SymGetOptions() | SYMOPT_UNDNAME);
         BOOL initd = SymInitialize(GetCurrentProcess(),NULL,TRUE);
+        int pid = (int)GetCurrentProcessId();
         #endif
+        
+        int pid = 0;
 
         fprintf(f, "{\n\t\"traceEvents\": [\n");
 
-        int idx = drv_atomic_int_load(&ctx->index);
-        int start = idx > ctx->size ? (idx + 1) % ctx->size : 0;
-        int count = idx > ctx->size ? ctx->size : idx;
-        int i;
-
-        int pid = (int)GetCurrentProcessId();
+        uint64_t idx = drv_atomic_int_load(&ctx->index);
+        uint64_t start = idx > ctx->size ? (idx + 1) % ctx->size : 0;
+        uint64_t count = idx > ctx->size ? ctx->size : idx;
+        uint64_t i;
 
         for(i = 0; i < count; ++i) {
                 int j = (start + i) % count;
@@ -253,11 +252,11 @@ drv_bench_convert_to_trace(
 
                 if(st_evt->id == DRV_BENCH_EVENT_ID_START) {
                         /* look for end */
-                        int k;
+                        uint64_t k;
                         for(k = i + 1; k < count; ++k) {
-                                int l = (start + k) % count;
+                                uint64_t l = (start + k) % count;
 
-                                struct drv_bench_info *evt = &ctx->info[k];
+                                struct drv_bench_info *evt = &ctx->info[l];
 
                                 if(evt->pair_ident == st_evt->pair_ident) {
                                         if(evt->id == DRV_BENCH_EVENT_ID_END) {
