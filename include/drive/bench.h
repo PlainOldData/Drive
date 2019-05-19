@@ -41,6 +41,7 @@ struct drv_bench_info {
         const char *name;
         const char *category;
         void *extra;
+        uint64_t pair_ident;
 };
 
 

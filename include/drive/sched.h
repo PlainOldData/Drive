@@ -38,15 +38,32 @@ typedef void*(*drv_sched_alloc_fn)(size_t);
 typedef void(*drv_sched_free_fn)(void *);
 typedef void(*drv_sched_log_fn)(drv_sched_log_type, const char *, void*);
 
+/* internal profiling hooks */
+typedef void(*drv_sched_profile_start_fn)(const char *func_name, void*ud);
+typedef void(*drv_sched_profile_end_fn)(const char *func_name, void*ud);
+
+/* task profiling hooks */
+typedef void(*drv_sched_profile_task_started_fn)(void *fn, void*ud);
+typedef void(*drv_sched_profile_task_ended_fn)(void *fn, void*ud);
+
 
 struct drv_sched_ctx_create_desc {
         int thread_count;               /* if 0 - then count = (cores - 2) */
         int thread_pin;                 /* if 1 - then set thread affinity */
         const char *thread_name;        /* set name of thread */
         drv_sched_alloc_fn sched_alloc; /* required */
+        
         drv_sched_log_fn log_fn;        /* optional - buit with DRV_SCHED_LOGGING = 1 */
         void *log_ud;                   /* optional - passed to logging cb */
         drv_sched_log_type log_level;   /* 0 for only errors, 1 for warnings and errors, 2 for warnings errors, and info */
+
+        drv_sched_profile_start_fn prof_start;
+        drv_sched_profile_end_fn prof_end;
+        void *prof_ud;
+
+        drv_sched_profile_task_started_fn task_start;
+        drv_sched_profile_task_ended_fn task_end;
+        void *task_ud;
 };
 
 

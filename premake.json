@@ -33,6 +33,10 @@
                                 "./include/",
                                 "./src/",
                                 "./src/thirdparty/boost_context/include/"
+                        ],
+
+                        "links-windows" : [
+                                "Dbghelp.lib"
                         ]
                 }
         ]

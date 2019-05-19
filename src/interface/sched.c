@@ -50,6 +50,16 @@
 #endif
 
 
+#ifndef DRV_GENERAL_PROFILING
+#define DRV_GENERAL_PROFILING 1
+#endif
+
+
+#ifndef DRV_TASK_PROFILING
+#define DRV_TASK_PROFILING 1
+#endif
+
+
 /* --------------------------------------------------- Thread Abstractions -- */
 /*
  * We use the OS's thread libs so a thin wrapper is used to cleanup the logic
@@ -397,6 +407,15 @@ struct drv_sched_ctx {
         drv_sched_log_fn log_fn;
         drv_sched_log_type log_level;
         void *log_ud;
+
+        /* profiling */
+        drv_sched_profile_start_fn prof_start;
+        drv_sched_profile_end_fn prof_end;
+        void *prof_ud;
+
+        drv_sched_profile_task_started_fn task_start;
+        drv_sched_profile_task_ended_fn task_end;
+        void *task_ud;
 };
 
 
@@ -448,8 +467,16 @@ drv_fiber_proc(
                 /* run the task */
                 drv_task_fn task_fn = fi->work_item.func;
                 void *task_arg      = fi->work_item.arg;
+
+                if(DRV_TASK_PROFILING && ctx->task_start) {
+                        ctx->task_start((void*)task_fn, ctx->task_ud);
+                }
                 
                 task_fn(th_arg->ctx, task_arg);
+
+                if(DRV_TASK_PROFILING && ctx->task_end) {
+                        ctx->task_end((void*)task_fn, ctx->task_ud);
+                }
 
                 if(DRV_PANIC_LOGGING) {
                         printf("DRV Fiber %p Job done\n", fi);
@@ -967,6 +994,13 @@ drv_sched_ctx_create(
         }
 
         /* setup ctx */
+        new_ctx->prof_start = desc->prof_start;
+        new_ctx->prof_end   = desc->prof_end;
+        new_ctx->prof_ud    = desc->prof_ud;
+
+        new_ctx->task_start = desc->task_start;
+        new_ctx->task_end   = desc->task_end;
+        new_ctx->task_ud    = desc->task_ud;
 
         /* output */
         /* only assign `out` when setup is complete */
@@ -1236,8 +1270,28 @@ drv_sched_wait(
                         printf("DRV Wait %p Jump back to thread proc\n",
                                 tls->work_fiber);
                 }
+
+                if(DRV_TASK_PROFILING && ctx->task_end) {
+                        void *func = (void*)tls->work_fiber->work_item.func;
+                        ctx->task_end(func, ctx->task_ud);
+                }
                 
                 jump_fcontext(fi_proc, th_proc, NULL);
+
+                if(DRV_TASK_PROFILING && ctx->task_start) {
+                        /* Recapture TLS */
+                        th_id = drv_thread_id_self();
+
+                        for(i = 0; i < ctx->thread_count; ++i) {
+                                if(drv_thread_id_equal(ctx->thread_args[i].thread_id, th_id)) {
+                                        tls = &ctx->thread_args[i];
+                                        break;
+                                };
+                        };
+
+                        void *func = (void*)tls->work_fiber->work_item.func;
+                        ctx->task_start(func, ctx->task_ud);
+                }
         }
 
         /* thread not in pool so spin until marker is done */
@@ -1379,7 +1433,7 @@ drv_spin_lock_init(
 	*/
 
 	/*
-  __sync_lock_test_and_set(&atomic->val, val);
+        __sync_lock_test_and_set(&atomic->val, val);
 	__sync_lock_release(&atomic->val);
 	*/
 
@@ -1474,5 +1528,6 @@ drv_spin_lock_release(
 #undef DRV_SCHED_MAX_FIBERS
 #undef DRV_SCHED_PCHECKS
 #undef DRV_SCHED_LOGGING
+#undef DRV_PROFILING
 #undef DRV_SPIN_LOCKED_ID
 #undef DRV_SPIN_UNLOCKED_ID

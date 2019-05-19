@@ -1,4 +1,5 @@
 #include <drive/bench.h>
+#include <stdio.h>
 #include <assert.h>
 
 
@@ -24,6 +25,7 @@ typedef pthread_mutex_t drv_mutex;
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <sys/timeb.h>
 typedef CRITICAL_SECTION drv_mutex;
 #endif
 
@@ -91,6 +93,8 @@ struct drv_bench_ctx {
         drv_atomic_int index;
         uint64_t size;
         struct drv_bench_info *info;
+
+        uint64_t start_ts;
 };
 
 
@@ -128,8 +132,12 @@ drv_bench_ctx_create(
         }
 
         drv_atomic_int_store(&ctx->index, 0);
-        ctx->size = desc->ring_buf_size / sizeof(*ctx);
+        ctx->size = desc->ring_buf_size;
         ctx->info = desc->ring_buf;
+
+        struct _timeb timebuffer;
+        _ftime64_s(&timebuffer);
+        ctx->start_ts = (uint64_t)((timebuffer.time * 1000L) + timebuffer.millitm);
         
         *out = ctx;
 
@@ -174,6 +182,12 @@ drv_bench_event_new(
         int idx = drv_atomic_int_inc(&ctx->index);
         idx = idx % ctx->size;
 
+        struct _timeb timebuffer;
+        _ftime64_s(&timebuffer);
+        uint64_t ts = (uint64_t)((timebuffer.time * 1000L) + timebuffer.millitm);
+
+        ctx->info[idx].ts = ts - ctx->start_ts;
+
         return &ctx->info[idx];
 }
 
@@ -199,13 +213,99 @@ drv_bench_event_fetch(
 /* --------------------------------------------------------------- Convert -- */
 
 
+#include <DbgHelp.h>
+
+
 drv_bench_result
 drv_bench_convert_to_trace(
         struct drv_bench_ctx *ctx,
         const struct drv_bench_to_trace *desc)
 {
-        (void)ctx;
-        (void)desc;
+        FILE *f = fopen(desc->file, "w");
+        if(f == NULL) {
+                assert(!"DRV_BENCH_RESULT_FAIL");
+                return DRV_BENCH_RESULT_FAIL;
+        }
+
+        #ifdef _WIN32
+        SymSetOptions(SymGetOptions() | SYMOPT_UNDNAME);
+        BOOL initd = SymInitialize(GetCurrentProcess(),NULL,TRUE);
+        #endif
+
+        fprintf(f, "{\n\t\"traceEvents\": [\n");
+
+        int idx = drv_atomic_int_load(&ctx->index);
+        int start = idx > ctx->size ? (idx + 1) % ctx->size : 0;
+        int count = idx > ctx->size ? ctx->size : idx;
+        int i;
+
+        int pid = (int)GetCurrentProcessId();
+
+        for(i = 0; i < count; ++i) {
+                int j = (start + i) % count;
+
+                struct drv_bench_info *st_evt = &ctx->info[j];
+                struct drv_bench_info *ed_evt = 0;
+
+                if(st_evt->id == DRV_BENCH_EVENT_ID_START) {
+                        /* look for end */
+                        int k;
+                        for(k = i + 1; k < count; ++k) {
+                                int l = (start + k) % count;
+
+                                struct drv_bench_info *evt = &ctx->info[k];
+
+                                if(evt->pair_ident == st_evt->pair_ident) {
+                                        if(evt->id == DRV_BENCH_EVENT_ID_END) {
+                                                ed_evt = evt;
+                                                break;
+                                        }
+                                }
+                        }
+                }
+
+                /* no end event, move on to the next one */
+                if(!ed_evt) {
+                        continue;
+                }
+
+                const char *name = st_evt->name ? st_evt->name : "Unknown func";
+
+                #ifdef _WIN32
+                if(ed_evt->flgs & DRV_BENCH_EVENT_EXTRA_TO_SYMBOL_NAME) {
+                        DWORD64  dwDisplacement = 0;
+                        char buffer[sizeof(SYMBOL_INFO) + 10000 * sizeof(TCHAR)] = {0};
+                        PSYMBOL_INFO sym = (PSYMBOL_INFO)buffer;
+
+                        sym->SizeOfStruct = sizeof(SYMBOL_INFO);
+                        sym->MaxNameLen = 256;
+
+                        SymFromAddr(GetCurrentProcess(), (DWORD64)st_evt->extra, &dwDisplacement, sym);
+                        name = sym->Name;
+                }
+                #endif
+
+                fprintf(f, "\t\t{\n");
+                fprintf(f, "\t\t\t\"name\": \"%s\",\n", name);
+                fprintf(f, "\t\t\t\"cat\": \"%s\",\n", st_evt->category);
+                fprintf(f, "\t\t\t\"ph\": \"%s\",\n", "X");
+                fprintf(f, "\t\t\t\"ts\": %f,\n", (float)(st_evt->ts) / 1000.f);
+                fprintf(f, "\t\t\t\"dur\": %f,\n", (float)(ed_evt->ts - st_evt->ts) / 1000.f);
+                fprintf(f, "\t\t\t\"pid\": %d,\n", pid);
+                fprintf(f, "\t\t\t\"tid\": %lu\n", st_evt->tid);
+                fprintf(f, "\t\t},\n");
+        }
+
+        /* erase last comma */
+        fseek(f, -(strlen(",\n") + 1), SEEK_CUR);
+
+        fprintf(f, "\n\t],\n");
+        fprintf(f, "\t\"displayTimeUnit\": \"ns\"\n}\n");
+
+        if (fclose(f) != 0) {
+                assert(!"DRV_BENCH_RESULT_FAIL");
+                return DRV_BENCH_RESULT_FAIL;
+        }
         
-        return DRV_BENCH_RESULT_FAIL;
+        return DRV_BENCH_RESULT_OK;
 }
