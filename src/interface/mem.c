@@ -6,6 +6,17 @@
 #include <string.h>
 
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
+
 /* ---------------------------------------------------------------- Config -- */
 
 
@@ -45,7 +56,11 @@ struct drv_stack_alloc {
 
 
 struct drv_stack_valloc {
-        int i;
+        void *start;
+        size_t page_size;
+        size_t pages_reserved;
+        size_t bytes;
+        size_t curr;
 };
 
 
@@ -133,14 +148,32 @@ drv_mem_ctx_destroy(
 
         /* get ctx */
         struct drv_mem_ctx *ctx = *destory_ctx;
-        memset(ctx, 0, sizeof(*ctx));
 
         if(ctx->free_fn) {
+                int i;
+
+                for(i = 0; i < DRV_MEM_MAX_STACK_ALLOC; ++i) {
+                        if(ctx->alloc_stack[i].start) {
+                                ctx->free_fn(ctx->alloc_stack[i].start);
+                        }
+                }
+
+                for(i = 0; i < DRV_MEM_MAX_STACK_VALLOC; ++i) {
+                        if(ctx->valloc_stack[i].start) {
+                                BOOL ok = VirtualFree(
+                                        ctx->valloc_stack[i].start,
+                                        0,
+                                        MEM_RELEASE);
+                                
+                                if (!ok) {
+                                        DWORD err = GetLastError();
+                                        assert(!"Failed in release");
+                                }
+                        }
+                }
+
                 ctx->free_fn(ctx);
         }
-
-        /* loop through allocators and clear memory */
-
 
         /* clear */
         *destory_ctx = 0;
@@ -230,6 +263,8 @@ drv_mem_stack_allocator_create(
 
         /* physical stack allocator */
         if(desc->alloc_type == DRV_MEM_ALLOC_TYPE_PHYSICAL) {
+
+                /* find a free allocator */
                 int i;
                 struct drv_stack_alloc *alloc = 0;
                 
@@ -245,28 +280,74 @@ drv_mem_stack_allocator_create(
                         return DRV_MEM_RESULT_FAIL;
                 }
                 
-                alloc->start = ctx->alloc_fn(desc->size_of_stack);
+                void *start = ctx->alloc_fn(desc->size_of_stack);
                 
-                if(!alloc->start) {
+                if(!start) {
                         assert(!"DRV_MEM_RESULT_FAIL");
                         return DRV_MEM_RESULT_FAIL;
                 }
                 
+                /* setup */
                 alloc->bytes = desc->size_of_stack;
+                alloc->start = start;
                 
+                /* allocator ID */
                 uint64_t alloc_type = DRV_MEM_ALLOC_STACK;
-                uint32_t alloc_idx = i;
-                uint64_t alloc_id = (alloc_type << 32) | alloc_idx;
+                uint32_t alloc_idx  = i;
+                uint64_t alloc_id   = (alloc_type << 32) | alloc_idx;
                 
                 *allocator_id = alloc_id;
                 
                 return DRV_MEM_RESULT_OK;
         }
+        /* virtual memory allocator */
         else if(desc->alloc_type == DRV_MEM_ALLOC_TYPE_VIRTUAL) {
-                return DRV_MEM_RESULT_FAIL;
-        }
-        else {
-                return DRV_MEM_RESULT_FAIL;
+
+                /* find a free allocator */
+                int i;
+                struct drv_stack_valloc *alloc = 0;
+                
+                for(i = 0; i < DRV_MEM_MAX_STACK_ALLOC; ++i) {
+                        if(!ctx->alloc_stack[i].start) {
+                                alloc = &ctx->valloc_stack[i];
+                                break;
+                        }
+                }
+                
+                if(!alloc) {
+                        assert(!"DRV_MEM_RESULT_FAIL");
+                        return DRV_MEM_RESULT_FAIL;
+                }
+
+                SYSTEM_INFO sys_info;
+                GetSystemInfo(&sys_info);
+
+                LPVOID addr = VirtualAlloc(
+                        NULL,
+                        desc->size_of_stack,
+                        MEM_RESERVE,
+                        PAGE_NOACCESS);
+
+                if(!addr) {
+                        assert(!"DRV_MEM_RESULT_FAIL");
+                        return DRV_MEM_RESULT_FAIL;
+                }
+
+                /* setup */
+                alloc->page_size      = sys_info.dwPageSize;
+                alloc->bytes          = desc->size_of_stack;
+                alloc->curr           = 0;
+                alloc->pages_reserved = 0;
+                alloc->start          = addr;
+
+                /* allocator ID */
+                uint64_t alloc_type = DRV_MEM_ALLOC_VSTACK;
+                uint32_t alloc_idx  = i;
+                uint64_t alloc_id   = (alloc_type << 32) | alloc_idx;
+                
+                *allocator_id = alloc_id;
+
+                return DRV_MEM_RESULT_OK;
         }
 
         return DRV_MEM_RESULT_FAIL;
@@ -277,7 +358,7 @@ drv_mem_result
 drv_mem_stack_alloc(
         struct drv_mem_ctx *ctx,
         uint64_t alloc_id,
-        unsigned bytes,
+        size_t bytes,
         void **out_mem)
 {
         /* param check */
@@ -317,8 +398,10 @@ drv_mem_stack_alloc(
                         return DRV_MEM_RESULT_FAIL;
                 }
                 
+                size_t old   = alloc->curr;
                 alloc->curr += bytes;
-                *out_mem = (void*)&alloc->start[alloc->curr];
+                char *store  = alloc->start;
+                *out_mem     = (void*)(store + old);
                 
                 return DRV_MEM_RESULT_OK;
         }
@@ -327,6 +410,40 @@ drv_mem_stack_alloc(
                         assert(!"DRV_MEM_RESULT_FAIL");
                         return DRV_MEM_RESULT_FAIL;
                 }
+
+                struct drv_stack_valloc *alloc = &ctx->valloc_stack[idx];
+                
+                if((bytes + alloc->curr) > alloc->bytes) {
+                        assert(!"DRV_MEM_RESULT_FAIL");
+                        return DRV_MEM_RESULT_FAIL;
+                }
+
+                /* allocate more pages */
+                if (bytes + alloc->curr > alloc->pages_reserved * alloc->page_size) {
+                        
+                        int pages = 1;
+
+                        while(bytes + alloc->curr > (alloc->pages_reserved + pages) * alloc->page_size) {
+                                pages += 1;
+                        }
+
+                        alloc->pages_reserved += pages;
+
+                        LPVOID addr = VirtualAlloc(
+                                alloc->start,
+                                alloc->page_size * alloc->pages_reserved,
+                                MEM_COMMIT,
+                                PAGE_READWRITE);
+
+                        assert(addr == alloc->start);
+                }
+                
+                size_t old = alloc->curr;
+                alloc->curr += bytes;
+                char *store = alloc->start;
+                *out_mem = (void*)(store + old);
+
+                return DRV_MEM_RESULT_OK;
         }
         
         return DRV_MEM_RESULT_FAIL;
@@ -374,6 +491,19 @@ drv_mem_stack_clear(
                         assert(!"DRV_MEM_RESULT_FAIL");
                         return DRV_MEM_RESULT_FAIL;
                 }
+
+                struct drv_stack_valloc *alloc = &ctx->valloc_stack[idx];
+
+                BOOL ok = VirtualFree(alloc->start, 0, MEM_DECOMMIT);
+                alloc->curr = 0;
+                alloc->pages_reserved = 0;
+
+                if(!ok) {
+                        assert(!"DRV_MEM_RESULT_FAIL");
+                        return DRV_MEM_RESULT_FAIL;
+                }
+                
+                return DRV_MEM_RESULT_OK;
         }
         
         return DRV_MEM_RESULT_FAIL;
@@ -402,7 +532,7 @@ drv_mem_tagged_alloc(
         struct drv_mem_ctx *ctx,
         uint64_t alloc_id,
         uint64_t tag_id,
-        unsigned bytes)
+        size_t bytes)
 {
         (void)ctx;
         (void)alloc_id;
