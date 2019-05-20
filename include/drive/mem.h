@@ -2,11 +2,17 @@
 #define DRV_ALLOC_INCLUED_BAA7D4EC_7559_4079_A6BA_86633231A05F
 
 
-#include <stdint.h>
-
-
 #ifdef __cplusplus
 extern "C" {
+#endif
+
+
+#ifndef __cplusplus
+#include <stdint.h>
+#include <stddef.h>
+#else
+#include <cstdint>
+#include <cstddef>
 #endif
 
 
@@ -88,11 +94,12 @@ drv_mem_result
 drv_mem_stack_alloc(
         struct drv_mem_ctx *ctx,
         uint64_t alloc_id,
-        unsigned bytes);
+        unsigned bytes,
+        void **out_mem);
 
 
 drv_mem_result
-drv_mem_stack_free(
+drv_mem_stack_clear(
         struct drv_mem_ctx *ctx,
         uint64_t alloc_id);
 

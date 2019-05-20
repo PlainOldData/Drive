@@ -38,7 +38,9 @@
 
 
 struct drv_stack_alloc {
-        int i;
+        void *start;
+        size_t curr;
+        size_t bytes;
 };
 
 
@@ -68,6 +70,13 @@ struct drv_mem_ctx {
 };
 
 
+/* allocator ids */
+#define DRV_MEM_ALLOC_STACK 1
+#define DRV_MEM_ALLOC_VSTACK 2
+#define DRV_MEM_ALLOC_TAGGED 3
+#define DRV_MEM_ALLOC_VTAGGED 4
+
+
 /* -------------------------------------------------------------- Lifetime -- */
 
 
@@ -92,6 +101,7 @@ drv_mem_ctx_create(
         }
 
         struct drv_mem_ctx *ctx = desc->alloc_fn(sizeof(*ctx));
+        memset(ctx, 0, sizeof(*ctx));
 
         if (!ctx) {
                 return DRV_MEM_RESULT_FAIL;
@@ -197,6 +207,7 @@ drv_mem_stack_allocator_create(
         struct drv_mem_stack_allocator_desc *desc,
         uint64_t *allocator_id)
 {
+        /* param check */
         if(DRV_MEM_PCHECKS && !ctx) {
                 assert(!"DRV_MEM_RESULT_BAD_PARAM");
                 return DRV_MEM_RESULT_BAD_PARAM;
@@ -211,19 +222,54 @@ drv_mem_stack_allocator_create(
                 assert(!"DRV_MEM_RESULT_BAD_PARAM");
                 return DRV_MEM_RESULT_BAD_PARAM;
         }
+        
+        if(DRV_MEM_PCHECKS && !desc->size_of_stack) {
+                assert(!"DRV_MEM_RESULT_INVALID_DESC");
+                return DRV_MEM_RESULT_INVALID_DESC;
+        }
 
-        /* look for a free */
+        /* physical stack allocator */
         if(desc->alloc_type == DRV_MEM_ALLOC_TYPE_PHYSICAL) {
+                int i;
+                struct drv_stack_alloc *alloc = 0;
                 
+                for(i = 0; i < DRV_MEM_MAX_STACK_ALLOC; ++i) {
+                        if(!ctx->alloc_stack[i].start) {
+                                alloc = &ctx->alloc_stack[i];
+                                break;
+                        }
+                }
+                
+                if(!alloc) {
+                        assert(!"DRV_MEM_RESULT_FAIL");
+                        return DRV_MEM_RESULT_FAIL;
+                }
+                
+                alloc->start = ctx->alloc_fn(desc->size_of_stack);
+                
+                if(!alloc->start) {
+                        assert(!"DRV_MEM_RESULT_FAIL");
+                        return DRV_MEM_RESULT_FAIL;
+                }
+                
+                alloc->bytes = desc->size_of_stack;
+                
+                uint64_t alloc_type = DRV_MEM_ALLOC_STACK;
+                uint32_t alloc_idx = i;
+                uint64_t alloc_id = (alloc_type << 32) | alloc_idx;
+                
+                *allocator_id = alloc_id;
+                
+                return DRV_MEM_RESULT_OK;
         }
         else if(desc->alloc_type == DRV_MEM_ALLOC_TYPE_VIRTUAL) {
-
+                return DRV_MEM_RESULT_FAIL;
         }
         else {
                 return DRV_MEM_RESULT_FAIL;
         }
 
-        return DRV_MEM_RESULT_OK;
+        return DRV_MEM_RESULT_FAIL;
 }
 
 
@@ -231,24 +277,105 @@ drv_mem_result
 drv_mem_stack_alloc(
         struct drv_mem_ctx *ctx,
         uint64_t alloc_id,
-        unsigned bytes)
+        unsigned bytes,
+        void **out_mem)
 {
-        (void)ctx;
-        (void)alloc_id;
-        (void)bytes;
+        /* param check */
+        if(DRV_MEM_PCHECKS && !ctx) {
+                assert(!"DRV_MEM_RESULT_BAD_PARAM");
+                return DRV_MEM_RESULT_BAD_PARAM;
+        }
 
+        if(DRV_MEM_PCHECKS && !alloc_id) {
+                assert(!"DRV_MEM_RESULT_BAD_PARAM");
+                return DRV_MEM_RESULT_BAD_PARAM;
+        }
+
+        if(DRV_MEM_PCHECKS && !bytes) {
+                assert(!"DRV_MEM_RESULT_BAD_PARAM");
+                return DRV_MEM_RESULT_BAD_PARAM;
+        }
+        
+        uint64_t idx = (alloc_id & 0xFFFFFFFF);
+        uint64_t type = ((alloc_id >> 32) & 0xFFFFFFFF);
+        
+        if(type != DRV_MEM_ALLOC_STACK && type != DRV_MEM_ALLOC_VSTACK) {
+                assert(!"DRV_MEM_RESULT_FAIL");
+                return DRV_MEM_RESULT_FAIL;
+        }
+
+        if(type == DRV_MEM_ALLOC_STACK) {
+                if(DRV_MEM_PCHECKS && idx >= DRV_MEM_MAX_STACK_ALLOC) {
+                        assert(!"DRV_MEM_RESULT_FAIL");
+                        return DRV_MEM_RESULT_FAIL;
+                }
+                
+                struct drv_stack_alloc *alloc = &ctx->alloc_stack[idx];
+                
+                if(bytes + alloc->curr > alloc->bytes) {
+                        assert(!"DRV_MEM_RESULT_FAIL");
+                        return DRV_MEM_RESULT_FAIL;
+                }
+                
+                alloc->curr += bytes;
+                *out_mem = (void*)&alloc->start[alloc->curr];
+                
+                return DRV_MEM_RESULT_OK;
+        }
+        else if(type == DRV_MEM_ALLOC_VSTACK) {
+                if(DRV_MEM_PCHECKS && idx >= DRV_MEM_MAX_STACK_VALLOC) {
+                        assert(!"DRV_MEM_RESULT_FAIL");
+                        return DRV_MEM_RESULT_FAIL;
+                }
+        }
+        
         return DRV_MEM_RESULT_FAIL;
 }
 
 
 drv_mem_result
-drv_mem_stack_free(
+drv_mem_stack_clear(
         struct drv_mem_ctx *ctx,
         uint64_t alloc_id)
 {
-        (void)ctx;
-        (void)alloc_id;
+        /* param check */
+        if(DRV_MEM_PCHECKS && !ctx) {
+                assert(!"DRV_MEM_RESULT_BAD_PARAM");
+                return DRV_MEM_RESULT_BAD_PARAM;
+        }
 
+        if(DRV_MEM_PCHECKS && !alloc_id) {
+                assert(!"DRV_MEM_RESULT_BAD_PARAM");
+                return DRV_MEM_RESULT_BAD_PARAM;
+        }
+        
+        uint64_t idx = (alloc_id & 0xFFFFFFFF);
+        uint64_t type = ((alloc_id >> 32) & 0xFFFFFFFF);
+        
+        if(type != DRV_MEM_ALLOC_STACK && type != DRV_MEM_ALLOC_VSTACK) {
+                assert(!"DRV_MEM_RESULT_FAIL");
+                return DRV_MEM_RESULT_FAIL;
+        }
+
+        if(type == DRV_MEM_ALLOC_STACK) {
+                if(DRV_MEM_PCHECKS && idx >= DRV_MEM_MAX_STACK_ALLOC) {
+                        assert(!"DRV_MEM_RESULT_FAIL");
+                        return DRV_MEM_RESULT_FAIL;
+                }
+                
+                struct drv_stack_alloc *alloc = &ctx->alloc_stack[idx];
+                
+                alloc->curr = 0;
+                
+                return DRV_MEM_RESULT_OK;
+        }
+        else if(type == DRV_MEM_ALLOC_VSTACK) {
+                if(DRV_MEM_PCHECKS && idx >= DRV_MEM_MAX_STACK_VALLOC) {
+                        assert(!"DRV_MEM_RESULT_FAIL");
+                        return DRV_MEM_RESULT_FAIL;
+                }
+        }
+        
         return DRV_MEM_RESULT_FAIL;
 }
 
@@ -308,3 +435,7 @@ drv_mem_tagged_free(
 #undef DRV_MEM_MAX_STACK_VALLOC
 #undef DRV_MEM_MAX_TAGGED_ALLOC
 #undef DRV_MEM_MAX_TAGGED_VALLOC
+#undef DRV_MEM_ALLOC_STACK
+#undef DRV_MEM_ALLOC_VSTACK
+#undef DRV_MEM_ALLOC_TAGGED
+#undef DRV_MEM_ALLOC_VTAGGED

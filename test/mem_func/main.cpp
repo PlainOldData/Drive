@@ -22,8 +22,11 @@ stack_phy_test()
                 assert(!"Failed to create ctx");
                 return 0;
         }
+        
+        const char *test_str1 = "Hello How Are You";
+        const char *test_str2 = "Small Str";
 
-        size_t stack_size = 256;
+        size_t stack_size = strlen(test_str1);
         uint64_t alloc_id = 0;
 
         drv_mem_stack_allocator_desc alloc_desc = {};
@@ -42,20 +45,59 @@ stack_phy_test()
                 return 0;
         }
 
-        void *alloc = nullptr;
-        mem_ok = drv_mem_allocate(ctx, 123, &alloc);
+        const char *test_buffer = 0;
 
-        if(mem_ok != DRV_MEM_RESULT_OK) {
-                assert(!"Failed to alloc memory");
-                return 0;
+        /* fill with data */
+        for(size_t i = 0; i < strlen(test_str1); ++i) {
+                void *alloc = nullptr;
+                
+                size_t size = 1;
+                mem_ok = drv_mem_stack_alloc(ctx, alloc_id, size, &alloc);
+                
+                if(mem_ok != DRV_MEM_RESULT_OK) {
+                        assert(!"Failed to alloc memory");
+                        return 0;
+                }
+                
+                /* save out start of stack */
+                if(i == 0) {
+                        test_buffer = (const char *)alloc;
+                }
+                
+                char *alloc_str = (char*)alloc;
+                *alloc_str = test_str1[i];
         }
 
-        mem_ok = drv_mem_free(ctx, alloc);
-
+        assert(strncmp(test_str1, test_buffer, strlen(test_str1)) == 0);
+        
+        mem_ok = drv_mem_stack_clear(ctx, alloc_id);
+        
         if(mem_ok != DRV_MEM_RESULT_OK) {
-                assert("Failed to free memory");
-                return 0;
+                assert("Failed to clear memory");
         }
+
+        /* fill with data again */
+        for(size_t i = 0; i < strlen(test_str2); ++i) {
+                void *alloc = nullptr;
+                
+                size_t size = 1;
+                mem_ok = drv_mem_stack_alloc(ctx, alloc_id, size, &alloc);
+                
+                if(mem_ok != DRV_MEM_RESULT_OK) {
+                        assert(!"Failed to alloc memory");
+                        return 0;
+                }
+                
+                /* save out start of stack */
+                if(i == 0) {
+                        test_buffer = (const char *)alloc;
+                }
+                
+                char *alloc_str = (char*)alloc;
+                *alloc_str = test_str2[i];
+        }
+        
+        assert(strncmp(test_str2, test_buffer, strlen(test_str2)) == 0);
 
         mem_ok = drv_mem_ctx_destroy(&ctx);
         assert(ctx == nullptr);
