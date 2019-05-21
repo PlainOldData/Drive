@@ -29,7 +29,7 @@ stack_virt_test()
                 char data[1048572];
         };
 
-        size_t count = 512;
+        size_t count = 2048;
         size_t stack_size = sizeof(chunk_of_data) * count;
         uint64_t alloc_id = 0;
 
@@ -64,7 +64,14 @@ stack_virt_test()
                 }
 
                 struct chunk_of_data *cod = (struct chunk_of_data*)alloc;
+
+                /* push dummy data */
                 cod->id = i;
+
+                int j;
+                for (j = 0; j < sizeof(cod->data); ++j) {
+                        cod->data[j] = j % 128;
+                }
 
                 if(i == 0) {
                         start = cod;
@@ -74,6 +81,11 @@ stack_virt_test()
         /* check */
         for(size_t i = 0; i < count; ++i) {
                 assert(start[i].id == i);
+
+                /* check some random data */
+                assert(start[i].data[0] == 0);
+                assert(start[i].data[1] == 1);
+                assert(start[i].data[10] == 10);
         }
         
         mem_ok = drv_mem_stack_clear(ctx, alloc_id);
@@ -262,7 +274,7 @@ general_test() {
 
 
 #ifndef BATCH_COUNT
-#define BATCH_COUNT 1 << 22
+#define BATCH_COUNT 1 << 12
 #endif
 
 

@@ -56,11 +56,15 @@ struct drv_stack_alloc {
 
 
 struct drv_stack_valloc {
-        void *start;
-        size_t page_size;
-        size_t pages_reserved;
-        size_t bytes;
-        size_t curr;
+        #ifdef _WIN32
+        LPVOID *start;
+        DWORD page_size;
+        SIZE_T pages_reserved;
+        SIZE_T bytes;
+        SIZE_T curr;
+        #else
+        #error "No Impl"
+        #endif
 };
 
 
@@ -319,6 +323,7 @@ drv_mem_stack_allocator_create(
                         return DRV_MEM_RESULT_FAIL;
                 }
 
+                #ifdef _WIN32
                 SYSTEM_INFO sys_info;
                 GetSystemInfo(&sys_info);
 
@@ -339,6 +344,7 @@ drv_mem_stack_allocator_create(
                 alloc->curr           = 0;
                 alloc->pages_reserved = 0;
                 alloc->start          = addr;
+                #endif
 
                 /* allocator ID */
                 uint64_t alloc_type = DRV_MEM_ALLOC_VSTACK;
@@ -420,22 +426,24 @@ drv_mem_stack_alloc(
 
                 /* allocate more pages */
                 if (bytes + alloc->curr > alloc->pages_reserved * alloc->page_size) {
-                        
                         int pages = 1;
 
                         while(bytes + alloc->curr > (alloc->pages_reserved + pages) * alloc->page_size) {
                                 pages += 1;
                         }
 
+                        char *next = (char*)alloc->start;
+                        next += (alloc->pages_reserved * alloc->page_size);
+
                         alloc->pages_reserved += pages;
 
                         LPVOID addr = VirtualAlloc(
-                                alloc->start,
-                                alloc->page_size * alloc->pages_reserved,
+                                next, /*alloc->start,*/
+                                alloc->page_size * pages, /*alloc->pages_reserved,*/
                                 MEM_COMMIT,
                                 PAGE_READWRITE);
 
-                        assert(addr == alloc->start);
+                        //assert(addr == alloc->start);
                 }
                 
                 size_t old = alloc->curr;
