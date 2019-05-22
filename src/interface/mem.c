@@ -425,10 +425,15 @@ drv_mem_stack_alloc(
                 }
 
                 /* allocate more pages */
-                if (bytes + alloc->curr > alloc->pages_reserved * alloc->page_size) {
-                        int pages = 1;
+                SIZE_T bytes_need = bytes + alloc->curr;
+                SIZE_T page_si = alloc->page_size;
+                SIZE_T page_re = alloc->pages_reserved;
+                SIZE_T bytes_alloced = page_re * page_si;
 
-                        while(bytes + alloc->curr > (alloc->pages_reserved + pages) * alloc->page_size) {
+                if(bytes_need > bytes_alloced) {
+                        SIZE_T pages = 1;
+
+                        while(bytes_need > (page_re + pages) * page_si) {
                                 pages += 1;
                         }
 
@@ -438,15 +443,16 @@ drv_mem_stack_alloc(
                         alloc->pages_reserved += pages;
 
                         LPVOID addr = VirtualAlloc(
-                                next, /*alloc->start,*/
-                                alloc->page_size * pages, /*alloc->pages_reserved,*/
+                                (LPVOID)next,
+                                alloc->page_size * pages,
                                 MEM_COMMIT,
                                 PAGE_READWRITE);
 
-                        //assert(addr == alloc->start);
+                        /* we only need to hold onto start */
+                        (void)addr;
                 }
                 
-                size_t old = alloc->curr;
+                SIZE_T old = alloc->curr;
                 alloc->curr += bytes;
                 char *store = alloc->start;
                 *out_mem = (void*)(store + old);
