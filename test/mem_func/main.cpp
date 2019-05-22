@@ -288,8 +288,8 @@ main() {
         };
         
         test_data tests[] = {
-                //{"general_test", general_test},
-                //{"stack_phy_test", stack_phy_test},
+                {"general_test", general_test},
+                {"stack_phy_test", stack_phy_test},
                 {"stack_virt_test", stack_virt_test},
         };
         
