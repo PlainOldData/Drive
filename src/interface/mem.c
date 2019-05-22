@@ -119,6 +119,11 @@ drv_mem_ctx_create(
                 return DRV_MEM_RESULT_INVALID_DESC;
         }
 
+        if(DRV_MEM_PCHECKS && !desc->free_fn) {
+                assert(!"DRV_MEM_RESULT_INVALID_DESC");
+                return DRV_MEM_RESULT_INVALID_DESC;
+        }
+
         struct drv_mem_ctx *ctx = desc->alloc_fn(sizeof(*ctx));
         memset(ctx, 0, sizeof(*ctx));
 
@@ -200,11 +205,11 @@ drv_mem_allocate(
                 return DRV_MEM_RESULT_BAD_PARAM;
         }
 
-        if(DRV_MEM_PCHECKS && !bytes) {
-                assert(!"DRV_MEM_RESULT_BAD_PARAM");
-                return DRV_MEM_RESULT_BAD_PARAM;
+        if(bytes) {
+                *out = 0;
+                return DRV_MEM_RESULT_OK;
         }
-
+        
         void *addr = ctx->alloc_fn(bytes);
 
         if (!addr) {
@@ -227,9 +232,11 @@ drv_mem_free(
                 return DRV_MEM_RESULT_BAD_PARAM;
         }
 
-        if (addr && ctx->free_fn) {
-                ctx->free_fn(addr);
+        if (!addr) {
+                return DRV_MEM_RESULT_OK;
         }
+
+        ctx->free_fn(addr);
 
         return DRV_MEM_RESULT_OK;
 }
@@ -378,9 +385,14 @@ drv_mem_stack_alloc(
                 return DRV_MEM_RESULT_BAD_PARAM;
         }
 
-        if(DRV_MEM_PCHECKS && !bytes) {
+        if(DRV_MEM_PCHECKS && !out_mem) {
                 assert(!"DRV_MEM_RESULT_BAD_PARAM");
                 return DRV_MEM_RESULT_BAD_PARAM;
+        }
+
+        if(bytes == 0) {
+                *out_mem = 0;
+                return DRV_MEM_RESULT_OK;
         }
         
         uint64_t idx = (alloc_id & 0xFFFFFFFF);
