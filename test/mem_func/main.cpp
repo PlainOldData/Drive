@@ -50,7 +50,7 @@ stack_virt_test()
         }
 
         struct chunk_of_data *start;
-
+        
         /* fill with data */
         for(size_t i = 0; i < count; ++i) {
                 void *alloc = nullptr;
@@ -90,6 +90,9 @@ stack_virt_test()
         
         mem_ok = drv_mem_stack_clear(ctx, alloc_id);
         
+        /* just to add some noise */
+        int *dummy_alloc = (int*)malloc(1 << 22);
+        
         if(mem_ok != DRV_MEM_RESULT_OK) {
                 assert("Failed to clear memory");
         }
@@ -108,6 +111,8 @@ stack_virt_test()
                 struct chunk_of_data *cod = (struct chunk_of_data*)alloc;
                 cod->id = i;
         }
+        
+        free(dummy_alloc);
         
         mem_ok = drv_mem_ctx_destroy(&ctx);
         assert(ctx == nullptr);

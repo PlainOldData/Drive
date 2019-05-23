@@ -16,6 +16,11 @@
 #include <windows.h>
 #endif
 
+#if defined(__APPLE__) || (__linux__)
+#include <unistd.h>
+#include <sys/mman.h>
+#endif
+
 
 /* ---------------------------------------------------------------- Config -- */
 
@@ -62,6 +67,12 @@ struct drv_stack_valloc {
         SIZE_T pages_reserved;
         SIZE_T bytes;
         SIZE_T curr;
+        #elif defined(__APPLE__) || (__linux__)
+        void *start;
+        long page_size;
+        size_t pages_reserved;
+        size_t bytes;
+        size_t curr;
         #else
         #error "No Impl"
         #endif
@@ -168,6 +179,7 @@ drv_mem_ctx_destroy(
                 }
 
                 for(i = 0; i < DRV_MEM_MAX_STACK_VALLOC; ++i) {
+                        #ifdef _WIN32
                         if(ctx->valloc_stack[i].start) {
                                 BOOL ok = VirtualFree(
                                         ctx->valloc_stack[i].start,
@@ -179,6 +191,9 @@ drv_mem_ctx_destroy(
                                         assert(!"Failed in release");
                                 }
                         }
+                        #elif defined(__APPLE__) || (__linux__)
+                        
+                        #endif
                 }
 
                 ctx->free_fn(ctx);
@@ -205,7 +220,7 @@ drv_mem_allocate(
                 return DRV_MEM_RESULT_BAD_PARAM;
         }
 
-        if(bytes) {
+        if(!bytes) {
                 *out = 0;
                 return DRV_MEM_RESULT_OK;
         }
@@ -351,6 +366,27 @@ drv_mem_stack_allocator_create(
                 alloc->curr           = 0;
                 alloc->pages_reserved = 0;
                 alloc->start          = addr;
+                #elif defined(__APPLE__) || defined(__linux__)
+                long page_size = sysconf(_SC_PAGE_SIZE);
+                
+                int prot = PROT_READ | PROT_WRITE;
+                int flags = MAP_SHARED | MAP_ANONYMOUS;
+                
+                void *addr = mmap(
+                        NULL,
+                        desc->size_of_stack,
+                        prot,
+                        flags,
+                        0,
+                        0);
+                
+                assert(addr != (void*)-1);
+                
+                alloc->start          = addr;
+                alloc->curr           = 0;
+                alloc->page_size      = page_size;
+                alloc->pages_reserved = 0;
+                alloc->bytes          = desc->size_of_stack;
                 #endif
 
                 /* allocator ID */
@@ -431,6 +467,7 @@ drv_mem_stack_alloc(
 
                 struct drv_stack_valloc *alloc = &ctx->valloc_stack[idx];
                 
+                #ifdef _WIN32
                 if((bytes + alloc->curr) > alloc->bytes) {
                         assert(!"DRV_MEM_RESULT_FAIL");
                         return DRV_MEM_RESULT_FAIL;
@@ -468,6 +505,50 @@ drv_mem_stack_alloc(
                 alloc->curr += bytes;
                 char *store = alloc->start;
                 *out_mem = (void*)(store + old);
+                #elif defined(__APPLE__) || (__linux__)
+                if((bytes + alloc->curr) > alloc->bytes) {
+                        assert(!"DRV_MEM_RESULT_FAIL");
+                        return DRV_MEM_RESULT_FAIL;
+                }
+
+                /* allocate more pages */
+                size_t bytes_need = bytes + alloc->curr;
+                size_t page_si = alloc->page_size;
+                size_t page_re = alloc->pages_reserved;
+                size_t bytes_alloced = page_re * page_si;
+
+                if(bytes_need > bytes_alloced) {
+                        size_t pages = 1;
+
+                        while(bytes_need > (page_re + pages) * page_si) {
+                                pages += 1;
+                        }
+
+                        char *next = (char*)alloc->start;
+                        next += (alloc->pages_reserved * alloc->page_size);
+
+                        alloc->pages_reserved += pages;
+                        
+                        int prot = PROT_READ | PROT_WRITE;
+                        int flags = MAP_SHARED | MAP_ANONYMOUS | MAP_FIXED;
+
+                        void *addr = mmap(
+                                next,
+                                pages * alloc->page_size,
+                                prot,
+                                flags,
+                                0,
+                                0);
+
+                        /* we only need to hold onto start */
+                        assert(addr != (void*)-1);
+                }
+                
+                size_t old = alloc->curr;
+                alloc->curr += bytes;
+                char *store = alloc->start;
+                *out_mem = (void*)(store + old);
+                #endif
 
                 return DRV_MEM_RESULT_OK;
         }
@@ -519,7 +600,8 @@ drv_mem_stack_clear(
                 }
 
                 struct drv_stack_valloc *alloc = &ctx->valloc_stack[idx];
-
+                
+                #ifdef _WIN32
                 BOOL ok = VirtualFree(alloc->start, 0, MEM_DECOMMIT);
                 alloc->curr = 0;
                 alloc->pages_reserved = 0;
@@ -528,6 +610,18 @@ drv_mem_stack_clear(
                         assert(!"DRV_MEM_RESULT_FAIL");
                         return DRV_MEM_RESULT_FAIL;
                 }
+                #elif defined(__APPLE__) || (__linux__)
+                if(alloc->pages_reserved) {
+//                        int ok = munmap(alloc->start, alloc->bytes);
+                        alloc->curr = 0;
+                        alloc->pages_reserved = 0;
+                        
+//                        if(ok != 0) {
+//                                assert(!"DRV_MEM_RESULT_FAIL");
+//                                return DRV_MEM_RESULT_FAIL;
+//                        }
+                }
+                #endif
                 
                 return DRV_MEM_RESULT_OK;
         }
