@@ -1,16 +1,16 @@
 {
         "projects" : [
                 {
-                        "name" : "drive",
+                        "name" : "drive_sched",
                         "kind" : "StaticLib",
                         "language" : "C-ANSI",
 
                         "files" : [
                                 "./premake.json",
-                                "./src/**.md",
-                                "./src/**.h",
-                                "./src/**.c",
-                                "./include/**.h"
+                                "./src/sched/**.md",
+                                "./src/sched/**.h",
+                                "./src/sched/**.c",
+                                "./include/drive/sched.h"
                         ],
 
                         "files-windows" : [
@@ -28,7 +28,6 @@
                                 "./src/thirdparty/boost_context/asm/make_x86_64_sysv_elf_gas.S"
                         ],
 
-
                         "include_dirs_public" : [
                                 "./include/",
                                 "./src/",
@@ -38,6 +37,78 @@
                         "links-windows" : [
                                 "Dbghelp.lib"
                         ]
+                },
+                {
+                        "name" : "drive_mem",
+                        "kind" : "StaticLib",
+                        "language" : "C-ANSI",
+
+                        "files" : [
+                                "./premake.json",
+                                "./src/mem/**.md",
+                                "./src/mem/**.h",
+                                "./src/mem/**.c",
+                                "./include/drive/mem.h"
+                        ],
+
+                    
+                        "include_dirs_public" : [
+                                "./include/",
+                                "./src/"
+                        ]
+                },
+                {
+                        "name" : "drive_bench",
+                        "kind" : "StaticLib",
+                        "language" : "C-ANSI",
+
+                        "files" : [
+                                "./premake.json",
+                                "./src/bench/**.md",
+                                "./src/bench/**.h",
+                                "./src/bench/**.c",
+                                "./include/drive/bench.h"
+                        ],
+
+                    
+                        "include_dirs_public" : [
+                                "./include/",
+                                "./src/"
+                        ]
+                },
+                {
+                        "name" : "drive_app",
+                        "kind" : "StaticLib",
+                        "language-windows" : "C++",
+                        "language-macosx" : "C",
+                        "language-linux" : "C",
+
+                        "files" : [
+                                "./premake.json",
+                                "./src/app/**.md"
+                        ],
+
+                        "files-windows" : [
+                                "./src/app/app_win32.cpp",
+                                "./include/drive/app.h"
+                        ],
+                    
+
+                        "files-linux" : [
+                                "./src/app/app_linux.c",
+                                "./include/drive/app.h"
+                        ],
+
+                        "files-macosx" : [
+                                "./src/app/app_macosx.m",
+                                "./include/drive/app.h"
+                        ],
+
+                        "include_dirs_public" : [
+                                "./include/",
+                                "./src/"
+                        ]
                 }
+
         ]
 }

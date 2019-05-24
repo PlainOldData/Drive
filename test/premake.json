@@ -13,7 +13,7 @@
                         ],
 
                         "dependencies" : [
-                            "drive"
+                            "drive_sched"
                         ]
                 },
                 {
@@ -29,7 +29,23 @@
                         ],
 
                         "dependencies" : [
-                            "drive"
+                            "drive_mem"
+                        ]
+                },
+                {
+                        "name" : "drive_app_func_test",
+                        "kind" : "ConsoleApp",
+                        "language" : "C++",
+
+                        "files" : [
+                                "./premake.json",
+                                "./app_func/**.md",
+                                "./app_func/**.hpp",
+                                "./app_func/**.cpp"
+                        ],
+
+                        "dependencies" : [
+                            "drive_app"
                         ]
                 }
         ]
