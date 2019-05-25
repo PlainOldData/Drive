@@ -44,6 +44,10 @@
                                 "./app_func/**.cpp"
                         ],
 
+                        "files_macosx" : [
+                                "./app_func/metal_test.mm"
+                        ],
+
                         "dependencies" : [
                             "drive_app"
                         ]

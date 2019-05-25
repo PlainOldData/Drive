@@ -3,6 +3,7 @@
 
 
 #include <stdint.h>
+#include <stddef.h>
 
 
 #ifdef __cplusplus
@@ -10,7 +11,7 @@ extern "C" {
 #endif
 
 
-struct drv_plat_ctx; /* opaque */
+struct drv_app_ctx; /* opaque */
 
 
 /* ----------------------------------------------------------- Identifiers -- */
@@ -45,7 +46,7 @@ typedef enum _drv_plat_gpu_device {
         DRV_PLAT_GPU_DEVICE_VULKAN,
         #elif defined(__linux__)
         DRV_PLAT_GPU_DEVICE_VULKAN,
-        #elif deifned(__APPLE__)
+        #elif defined(__APPLE__)
         DRV_PLAT_GPU_DEVICE_METAL,
         #endif
 } drv_plat_gpu_device;
@@ -55,6 +56,7 @@ struct drv_plat_ctx_create_desc {
         int width;
         int height;
         const char *title;
+        void *gpu_device;
         drv_app_alloc_fn alloc_fn;
         drv_app_free_fn free_fn;
 };
@@ -86,6 +88,12 @@ struct drv_app_data {
 };
 #endif
 
+#ifdef __APPLE__
+struct drv_app_data {
+        void *layer;
+};
+#endif
+
 
 drv_app_result
 drv_app_data_get(
@@ -108,33 +116,6 @@ drv_plat_event_poll(
 drv_app_result
 drv_plat_surface(
         struct drv_plat_ctx *ctx);
-
-
-/* ----------------------------------------------------------------- Input -- */
-
-
-struct drv_keyboard_get_desc {
-        int keyboard_id;
-};
-
-
-drv_app_result
-drv_plat_keyboard_get(
-        struct drv_plat_ctx *ctx,
-        uint8_t **out_key_state,
-        int *out_key_count);
-
-
-struct drv_mouse_get_desc {
-        int mouse_id;
-};
-
-
-drv_app_result
-drv_plat_keyboard_get(
-        struct drv_plat_ctx *ctx,
-        uint8_t **out_key_state,
-        int *out_key_count);
 
 
 
