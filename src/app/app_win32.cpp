@@ -332,6 +332,8 @@ drv_app_data_get(
         struct drv_app_data *data)
 {
         data->hwnd = ctx->hwnd;
+
+        return DRV_APP_RESULT_OK;
 }
 
 #endif

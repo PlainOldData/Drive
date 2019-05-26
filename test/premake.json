@@ -40,12 +40,20 @@
                         "files" : [
                                 "./premake.json",
                                 "./app_func/**.md",
-                                "./app_func/**.hpp",
-                                "./app_func/**.cpp"
+                                "./app_func/main.cpp",
+                                "./app_func/test.h"
                         ],
 
-                        "files_macosx" : [
+                        "files-macosx" : [
                                 "./app_func/metal_test.mm"
+                        ],
+
+                        "files-windows" : [
+                                "./app_func/dx12_test.cpp"
+                        ],
+
+                        "include_dirs" : [
+                                "./app_func/"
                         ],
 
                         "dependencies" : [

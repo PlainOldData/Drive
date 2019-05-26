@@ -92,6 +92,13 @@
                                 "./src/app/app_win32.cpp",
                                 "./include/drive/app.h"
                         ],
+
+
+                        "links-windows" : [
+                                "d3d12.lib",
+                                "dxgi.lib",
+                                "d3dcompiler.lib"
+                        ],
                     
 
                         "files-linux" : [

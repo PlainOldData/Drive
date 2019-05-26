@@ -1,12 +1,7 @@
 #include <drive/app.h>
 #include <stdlib.h>
 #include <assert.h>
-
-
-void *test_device();
-void test_setup(struct drv_app_ctx *ctx);
-void test_tick();
-void test_shutdown();
+#include <test.h>
 
 
 int

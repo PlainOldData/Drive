@@ -1,3 +1,4 @@
+#ifdef __APPLE__
 
 #include <drive/app.h>
 #import <Cocoa/Cocoa.h>
@@ -180,3 +181,5 @@ void test_shutdown()
 {
 
 }
+
+#endif
