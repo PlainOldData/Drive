@@ -2,8 +2,13 @@
 #define DRV_PLAT_INCLUDED_22FADC07_0946_4F22_B0CC_985AC0A785E6
 
 
+#ifndef __cplusplus
 #include <stdint.h>
 #include <stddef.h>
+#else
+#include <cstdint>
+#include <cstddef>
+#endif
 
 
 #ifdef __cplusplus
@@ -40,19 +45,29 @@ typedef void(*drv_app_free_fn)(void *);
 /* -------------------------------------------------------------- Lifetime -- */
 
 
-typedef enum _drv_plat_gpu_device {
+typedef enum _drv_app_gpu_device_id {
         #ifdef _WIN32
-        DRV_PLAT_GPU_DEVICE_DX12,
-        DRV_PLAT_GPU_DEVICE_VULKAN,
+        DRV_APP_GPU_DEVICE_DX12,
+        DRV_APP_GPU_DEVICE_VULKAN,
         #elif defined(__linux__)
-        DRV_PLAT_GPU_DEVICE_VULKAN,
+        DRV_APP_GPU_DEVICE_VULKAN,
         #elif defined(__APPLE__)
-        DRV_PLAT_GPU_DEVICE_METAL,
+        DRV_APP_GPU_DEVICE_METAL,
         #endif
-} drv_plat_gpu_device;
+} drv_app_gpu_device_id;
 
 
-struct drv_plat_ctx_create_desc {
+/*
+ * returns DRV_APP_RESULT_BAD_PARAMS if device is not recognized.
+ * returns DRV_APP_RESULT_OK on success.
+ */
+drv_app_result
+drv_app_gpu_device(
+        drv_app_gpu_device_id device,
+        void **out_device);
+
+
+struct drv_app_ctx_create_desc {
         int width;
         int height;
         const char *title;
@@ -62,61 +77,71 @@ struct drv_plat_ctx_create_desc {
 };
 
 
+/*
+ * returns DRV_APP_RESULT_BAD_PARAMS if desc is null.
+ * returns DRV_APP_RESULT_BAD_PARAMS if out_ctx is null.
+ * returns DRV_APP_RESULT_INVALID_DESC if desc.gpu_device is null.
+ * returns DRV_APP_RESULT_INVALID_DESC if desc.alloc_fn is null.
+ * returns DRV_APP_RESULT_FAIL on internal failures.
+ * returns DRV_APP_RESULT_OK on success.
+ */
 drv_app_result
 drv_app_ctx_create(
-        const struct drv_plat_ctx_create_desc *desc,
-        struct drv_app_ctx **out);
+        const struct drv_app_ctx_create_desc *desc,
+        struct drv_app_ctx **out_ctx);
 
 
+/*
+ * returns DRV_APP_RESULT_BAD_PARAMS if destroy is null.
+ * returns DRV_APP_RESULT_BAD_PARAMS if *destroy is null.
+ * returns DRV_APP_RESULT_FAIL on internal failures.
+ * returns DRV_APP_RESULT_OK on success.
+ */
 drv_app_result
 drv_app_ctx_destroy(
         struct drv_app_ctx **destroy);
 
 
+/*
+ * returns DRV_APP_RESULT_BAD_PARAMS if ctx is null.
+ * returns DRV_APP_RESULT_FAIL on internal failures.
+ * returns DRV_APP_RESULT_FAIL if ctx is no longer valid.
+ * returns DRV_APP_RESULT_OK on success.
+ */
 drv_app_result
 drv_app_ctx_process(
         struct drv_app_ctx *ctx,
         uint64_t *out_events);
 
 
-/* ------------------------------------------------------------------- App -- */
+/* ------------------------------------------------------------------ Data -- */
 
 
 #ifdef _WIN32
 struct drv_app_data {
-        void* hwnd;
+        void *hwnd;
+        void *gpu_device;
 };
 #endif
 
 #ifdef __APPLE__
 struct drv_app_data {
         void *layer;
+        void *gpu_device;
 };
 #endif
 
 
+/*
+ * returns DRV_APP_RESULT_BAD_PARAMS if ctx is null.
+ * returns DRV_APP_RESULT_BAD_PARAMS if ctx is null.
+ * returns DRV_APP_RESULT_FAIL on internal failures.
+ * returns DRV_APP_RESULT_OK on success.
+ */
 drv_app_result
 drv_app_data_get(
         struct drv_app_ctx *ctx,
         struct drv_app_data *data);
-
-
-/* ---------------------------------------------------------------- Events -- */
-
-
-drv_app_result
-drv_plat_event_poll(
-        struct drv_plat_ctx *ctx,
-        uint64_t *out_events);
-
-
-/* ---------------------------------------------------------------- Window -- */
-
-
-drv_app_result
-drv_plat_surface(
-        struct drv_plat_ctx *ctx);
-
 
 
 #ifdef __cplusplus

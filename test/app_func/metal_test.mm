@@ -50,10 +50,11 @@ test_device() {
 int
 test_setup(struct drv_app_ctx *ctx)
 {
-        struct drv_app_data data = {0};
+        struct drv_app_data data = {0, 0};
         drv_app_result app_ok = drv_app_data_get(ctx, &data);
         assert(app_ok == DRV_APP_RESULT_OK);
         
+        metal_device = id<MTLDevice>(data.gpu_device);
         metal_layer= (CAMetalLayer*)data.layer;
         
         cmd_queue = [metal_device newCommandQueue];

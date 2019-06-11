@@ -5,6 +5,14 @@
 #import <QuartzCore/CAMetalLayer.h>
 
 
+/* ---------------------------------------------------------------- Config -- */
+
+
+#ifndef DRV_APP_PCHECK
+#define DRV_APP_PCHECK 1
+#endif
+
+
 /* -------------------------------------------------------------- Platform -- */
 
 
@@ -70,27 +78,75 @@
 /* -------------------------------------------------------------- Lifetime -- */
 
 
+drv_app_result
+drv_app_gpu_device(
+        drv_app_gpu_device_id device,
+        void **out_device)
+{
+        if(device == DRV_APP_GPU_DEVICE_METAL) {
+                *out_device = MTLCreateSystemDefaultDevice();
+                return DRV_APP_RESULT_OK;
+        }
+        
+        return DRV_APP_RESULT_BAD_PARAMS;
+}
+
+
 struct drv_app_ctx {
         macos_window_delegate *window_delegate;
         CAMetalLayer * metal_layer;
         macos_metal_view * metal_view;
+        void * gpu_device;
+        drv_app_free_fn free_fn;
+        
+        int width, height;
+        
+        NSAutoreleasePool* app_pool;
 };
 
 
 drv_app_result
 drv_app_ctx_create(
-        const struct drv_plat_ctx_create_desc *desc,
-        struct drv_app_ctx **out)
+        const struct drv_app_ctx_create_desc *desc,
+        struct drv_app_ctx **out_ctx)
 {
-        struct drv_app_ctx *ctx = malloc(sizeof(*ctx));
+        /* param checks */
+        if(DRV_APP_PCHECK && !desc) {
+                assert(!"DRV_APP_RESULT_BAD_PARAMS");
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
+        
+        if(DRV_APP_PCHECK && !out_ctx) {
+                assert(!"DRV_APP_RESULT_BAD_PARAMS");
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
+        
+        if(DRV_APP_PCHECK && !desc->alloc_fn) {
+                assert(!"DRV_APP_RESULT_INVALID_DESC");
+                return DRV_APP_RESULT_INVALID_DESC;
+        }
+        
+        if(DRV_APP_PCHECK && !desc->gpu_device) {
+                assert(!"DRV_APP_RESULT_INVALID_DESC");
+                return DRV_APP_RESULT_INVALID_DESC;
+        }
+        
+        struct drv_app_ctx *ctx = desc->alloc_fn(sizeof(*ctx));
+        memset(ctx, 0, sizeof(*ctx));
+        
+        ctx->gpu_device = desc->gpu_device;
+        ctx->width      = desc->width;
+        ctx->height     = desc->height;
+        ctx->free_fn    = desc->free_fn;
         
         /* app */
-        [[NSAutoreleasePool alloc] init];
+        ctx->app_pool = [[NSAutoreleasePool alloc] init];
         [NSApplication sharedApplication];
         [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
 
         /* name */
-        NSString * app_name = [NSString stringWithUTF8String:desc->title];
+        const char *name = desc->title ? desc->title : "Drive";
+        NSString *app_name = [NSString stringWithUTF8String:name];
 
         /* menu */
         NSMenu * men_bar = 0;
@@ -125,7 +181,7 @@ drv_app_ctx_create(
         [NSApp setDelegate:app_delegate];
         [NSApp run];
 
-        CGFloat si[2] = {640, 360};
+        CGFloat si[2] = {(CGFloat)desc->width, (CGFloat)desc->height};
         NSRect view_rect = NSMakeRect(0, 0, si[0], si[1]);
 
         NSWindowStyleMask win_style =
@@ -169,7 +225,7 @@ drv_app_ctx_create(
         [NSApp activateIgnoringOtherApps:YES];
         [window makeKeyAndOrderFront:nil];
 
-        *out = ctx;
+        *out_ctx = ctx;
     
         return DRV_APP_RESULT_OK;
 }
@@ -179,14 +235,33 @@ drv_app_result
 drv_app_ctx_destroy(
         struct drv_app_ctx **destroy)
 {
-        (void)destroy;
+        if(DRV_APP_PCHECK && !destroy) {
+                assert(!"DRV_APP_RESULT_BAD_PARAMS");
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
         
-        return DRV_APP_RESULT_FAIL;
+        if(DRV_APP_PCHECK && !(*destroy)) {
+                assert(!"DRV_APP_RESULT_BAD_PARAMS");
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
+        
+        struct drv_app_ctx *ctx = *destroy;
+        
+        [ctx->app_pool drain];
+        
+        if(ctx->free_fn) {
+                ctx->free_fn(ctx);
+        }
+        
+        *destroy = 0;
+        
+        return DRV_APP_RESULT_OK;
 }
 
 
 NSEvent *
-process_next_evt(NSDate *date) {
+process_next_evt(NSDate *date)
+{
         NSEvent *evt = 0;
         
         evt = [NSApp nextEventMatchingMask:NSEventMaskAny
@@ -203,12 +278,18 @@ drv_app_ctx_process(
         struct drv_app_ctx *ctx,
         uint64_t *out_events)
 {
+        if(DRV_APP_PCHECK && !ctx) {
+                assert(!"DRV_APP_RESULT_BAD_PARAMS");
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
+        
         (void)out_events;
         
         /* app event process */
-        NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
+        NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
         NSDate *past = [NSDate distantPast];
-        
+
+        /* process events */
         NSEvent *evt = process_next_evt(past);
         
         while(evt) {
@@ -217,16 +298,16 @@ drv_app_ctx_process(
         }
         
         CGSize si;
-        si.width  = 640.0;
-        si.height = 360.0;
+        si.width  = ctx->width;
+        si.height = ctx->height;
         ctx->metal_layer.drawableSize = si;
 
         [pool drain];
         pool = nil;
 
         if(ctx->window_delegate->try_close) {
-            ctx->window_delegate->try_close = 0;
-            return DRV_APP_RESULT_FAIL;
+                ctx->window_delegate->try_close = 0;
+                return DRV_APP_RESULT_FAIL;
         }
 
         return DRV_APP_RESULT_OK;
@@ -238,7 +319,18 @@ drv_app_data_get(
         struct drv_app_ctx *ctx,
         struct drv_app_data *data)
 {
+        if(DRV_APP_PCHECK && !ctx) {
+                assert(!"DRV_APP_RESULT_BAD_PARAMS");
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
+        
+        if(DRV_APP_PCHECK && !data) {
+                assert(!"DRV_APP_RESULT_BAD_PARAMS");
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
+
         data->layer = (void*)ctx->metal_layer;
+        data->gpu_device = ctx->gpu_device;
 
         return DRV_APP_RESULT_OK;
 }

@@ -7,7 +7,6 @@ extern "C" {
 #endif
 
 
-void *test_device();
 int test_setup(struct drv_app_ctx *ctx);
 void test_tick();
 void test_shutdown();
