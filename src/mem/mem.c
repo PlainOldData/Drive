@@ -62,7 +62,7 @@ struct drv_stack_alloc {
 
 struct drv_stack_valloc {
         #ifdef _WIN32
-        LPVOID *start;
+        LPVOID start;
         DWORD page_size;
         SIZE_T pages_reserved;
         SIZE_T bytes;
@@ -188,7 +188,7 @@ drv_mem_ctx_destroy(
                                 
                                 if (!ok) {
                                         DWORD err = GetLastError();
-                                        assert(!"Failed in release");
+                                        assert(!"Failed in release" && err);
                                 }
                         }
                         #elif defined(__APPLE__) || (__linux__)
