@@ -582,7 +582,8 @@ drv_thread_proc(
                 /* allow main thread to quit if work is done */
                 drv_mutex_lock(&ctx->mut);
                 
-                thread_id_t main_tid = ctx->thread_args[0].thread_id;
+                const struct drv_thread_arg *th_args = ctx->thread_args;
+                const thread_id_t main_tid = th_args[0].thread_id;
                 
                 if(drv_thread_id_equal(this_tid, main_tid)) {
                         if(ctx->free_fiber_count == DRV_SCHED_MAX_FIBERS &&

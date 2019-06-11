@@ -1,5 +1,6 @@
 #ifdef __APPLE__
 
+#include <test.h>
 #include <drive/app.h>
 #import <Cocoa/Cocoa.h>
 #import <Metal/Metal.h>
@@ -35,7 +36,8 @@ struct metal_vtx vtx_array[] = {
 };
 
 
-void* test_device() {
+void*
+test_device() {
         static int once = 1;
         if(once) {
                 metal_device = MTLCreateSystemDefaultDevice();
@@ -45,7 +47,8 @@ void* test_device() {
 }
 
 
-void test_setup(struct drv_app_ctx *ctx)
+int
+test_setup(struct drv_app_ctx *ctx)
 {
         struct drv_app_data data = {0};
         drv_app_result app_ok = drv_app_data_get(ctx, &data);
@@ -90,9 +93,9 @@ void test_setup(struct drv_app_ctx *ctx)
         "}\n"
         "\n"
         "fragment float4 fs(struct metal_raster_data in [[stage_in]]) {\n"
-        //"   return in.color;\n"
-        " float4 c; c.x = 0; c.y = 1; c.z = 0; c.w = 1;"
-        " return c;"
+        "   return in.color;\n"
+//        " float4 c; c.x = 0; c.y = 1; c.z = 0; c.w = 1;"
+//        " return c;"
         "}\n"
         "";
         
@@ -116,6 +119,8 @@ void test_setup(struct drv_app_ctx *ctx)
         if(pipeline == nil) {
                 NSLog(@"%@", metal_err);
         }
+        
+        return 1;
 }
 
 

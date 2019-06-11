@@ -34,7 +34,7 @@
                 },
                 {
                         "name" : "drive_app_func_test",
-                        "kind" : "ConsoleApp",
+                        "kind" : "WindowedApp",
                         "language" : "C++",
 
                         "files" : [
@@ -45,7 +45,9 @@
                         ],
 
                         "files-macosx" : [
-                                "./app_func/metal_test.mm"
+                                "./app_func/*.mm",
+                                "./app_func/*.m",
+                                "./app_func/*.metal"
                         ],
 
                         "files-windows" : [

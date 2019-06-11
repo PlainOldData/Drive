@@ -83,10 +83,18 @@
                         "language-macosx" : "C",
                         "language-linux" : "C",
 
+
                         "files" : [
                                 "./premake.json",
                                 "./src/app/**.md"
                         ],
+
+
+                        "include_dirs_public" : [
+                                "./include/",
+                                "./src/"
+                        ],
+
 
                         "files-windows" : [
                                 "./src/app/app_win32.cpp",
@@ -99,21 +107,23 @@
                                 "dxgi.lib",
                                 "d3dcompiler.lib"
                         ],
-                    
 
-                        "files-linux" : [
-                                "./src/app/app_linux.c",
-                                "./include/drive/app.h"
-                        ],
 
                         "files-macosx" : [
                                 "./src/app/app_macosx.m",
                                 "./include/drive/app.h"
                         ],
 
-                        "include_dirs_public" : [
-                                "./include/",
-                                "./src/"
+
+                        "links-macosx" : [
+                                "Cocoa.framework",
+                                "Metal.framework"
+                        ],
+                    
+
+                        "files-linux" : [
+                                "./src/app/app_linux.c",
+                                "./include/drive/app.h"
                         ]
                 }
 
