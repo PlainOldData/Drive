@@ -58,7 +58,7 @@ LRESULT CALLBACK
 internal_wnd_proc(HWND hWnd, UINT u_msg, WPARAM w_param, LPARAM l_param)
 {
         LRESULT result = 0;
-        
+
         drv_app_ctx *ctx = (drv_app_ctx*)GetPropA(hWnd, "drive_app_ctx");
 
         switch (u_msg) {
@@ -175,7 +175,7 @@ internal_wnd_proc(HWND hWnd, UINT u_msg, WPARAM w_param, LPARAM l_param)
 
 drv_app_result
 drv_app_ctx_create(
-        const struct drv_plat_ctx_create_desc *desc,
+        const struct drv_app_ctx_create_desc *desc,
         struct drv_app_ctx **out)
 {
         /* param check */
@@ -335,5 +335,15 @@ drv_app_data_get(
 
         return DRV_APP_RESULT_OK;
 }
+
+drv_app_result
+drv_app_gpu_device(
+        drv_app_gpu_device_id device,
+        void **out_device)
+{
+        out_device = 0;
+        return DRV_APP_RESULT_OK;
+}
+
 
 #endif
