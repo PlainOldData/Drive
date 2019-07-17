@@ -112,6 +112,69 @@ drv_app_result
 drv_app_ctx_process(
         struct drv_app_ctx *ctx,
         uint64_t *out_events);
+        
+        
+/* ----------------------------------------------------------------- Input -- */
+
+
+typedef enum _drv_app_button_state {
+        DRV_APP_BUTTON_STATE_UP         = 1 << 0,
+        DRV_APP_BUTTON_STATE_UP_EVENT   = 1 << 1,
+        DRV_APP_BUTTON_STATE_DOWN       = 1 << 2,
+        DRV_APP_BUTTON_STATE_DOWN_EVENT = 1 << 3,
+} drv_app_button_state;
+
+
+typedef enum _drv_app_kb_id {
+        /* dummy key */
+        
+        DRV_APP_KB_NULL,
+
+        /* alphabet */
+
+        DRV_APP_KB_A, DRV_APP_KB_B, DRV_APP_KB_C, DRV_APP_KB_D, DRV_APP_KB_E,
+        DRV_APP_KB_F, DRV_APP_KB_G, DRV_APP_KB_H, DRV_APP_KB_I, DRV_APP_KB_J,
+        DRV_APP_KB_K, DRV_APP_KB_L, DRV_APP_KB_M, DRV_APP_KB_N, DRV_APP_KB_O,
+        DRV_APP_KB_P, DRV_APP_KB_Q, DRV_APP_KB_R, DRV_APP_KB_S, DRV_APP_KB_T,
+        DRV_APP_KB_U, DRV_APP_KB_V, DRV_APP_KB_W, DRV_APP_KB_X, DRV_APP_KB_Y,
+        DRV_APP_KB_Z,
+        
+        /* numbers */
+        
+        DRV_APP_KB_1, DRV_APP_KB_2, DRV_APP_KB_3, DRV_APP_KB_4, DRV_APP_KB_5,
+        DRV_APP_KB_6, DRV_APP_KB_7, DRV_APP_KB_8, DRV_APP_KB_9, DRV_APP_KB_0,
+        
+        /* direction keys */
+        
+        DRV_APP_KB_UP, DRV_APP_KB_DOWN, DRV_APP_KB_LEFT, DRV_APP_KB_RIGHT,
+
+        /* function keys */
+
+        DRV_APP_KB_F1, DRV_APP_KB_F2,  DRV_APP_KB_F3,  DRV_APP_KB_F4,
+        DRV_APP_KB_F5, DRV_APP_KB_F6,  DRV_APP_KB_F7,  DRV_APP_KB_F8,
+        DRV_APP_KB_F9, DRV_APP_KB_F10, DRV_APP_KB_F11, DRV_APP_KB_F12,
+        
+        /* others */
+        
+        DRV_APP_KB_ESC, DRV_APP_KB_SPACE,
+        
+        /* count */
+        
+        DRV_APP_KB_COUNT,
+
+} drv_app_kb_id;
+
+
+/*
+ * returns DRV_APP_RESULT_BAD_PARAMS if ctx is null.
+ * returns DRV_APP_RESULT_BAD_PARAMS if key_data is null.
+ * returns DRV_APP_RESULT_FAIL on internal failures.
+ * returns DRV_APP_RESULT_OK on success.
+ */
+drv_app_result
+drv_app_input_data_get(
+        struct drv_app_ctx *ctx,
+        uint8_t **key_data); /* Valid for lifetime of app - ANSI US keys */
 
 
 /* ------------------------------------------------------------------ Data -- */
@@ -126,7 +189,7 @@ struct drv_app_data {
 
 #ifdef __APPLE__
 struct drv_app_data {
-        void *layer;
+        void *view;
         void *gpu_device;
 };
 #endif
@@ -134,7 +197,7 @@ struct drv_app_data {
 
 /*
  * returns DRV_APP_RESULT_BAD_PARAMS if ctx is null.
- * returns DRV_APP_RESULT_BAD_PARAMS if ctx is null.
+ * returns DRV_APP_RESULT_BAD_PARAMS if data is null.
  * returns DRV_APP_RESULT_FAIL on internal failures.
  * returns DRV_APP_RESULT_OK on success.
  */

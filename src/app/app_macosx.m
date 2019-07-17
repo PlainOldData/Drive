@@ -55,23 +55,11 @@
         try_close++;
         return NO;
 }
+
 @end
 
 @interface macos_metal_view : NSView {}
-@end
-
-@implementation macos_metal_view
-- (BOOL)wantsUpdateLayer
-{
-        return YES;
-}
-
-- (CALayer *)makeBackingLayer
-{
-        Class layer_class = NSClassFromString(@"CAMetalLayer");
-        
-        return [layer_class layer];
-}
+@property (nonatomic) struct drv_app_ctx *drv_ctx;
 @end
 
 
@@ -99,10 +87,59 @@ struct drv_app_ctx {
         void * gpu_device;
         drv_app_free_fn free_fn;
         
+        uint64_t events;
+        
         int width, height;
+        
+        #ifdef __APPLE__
+        size_t keycode_map[0xFF];
+        #endif
+        uint8_t key_state[DRV_APP_KB_COUNT];
         
         NSAutoreleasePool* app_pool;
 };
+
+
+@implementation macos_metal_view
+- (BOOL)wantsUpdateLayer
+{
+        return YES;
+}
+
+- (BOOL)acceptsFirstResponder {
+        return YES;
+}
+
+- (void)keyDown:(NSEvent *)event
+{
+        UInt16 kc = [event keyCode];
+        uint8_t b = DRV_APP_BUTTON_STATE_DOWN_EVENT | DRV_APP_BUTTON_STATE_DOWN;
+        
+        drv_app_kb_id idx = [self drv_ctx]->keycode_map[kc];
+        [self drv_ctx]->key_state[idx] = b;
+        
+        [self drv_ctx]->events |= DRV_APP_EVENT_INPUT;
+}
+
+
+- (void)keyUp:(NSEvent *)event
+{
+        UInt16 kc = [event keyCode];
+        uint8_t b = DRV_APP_BUTTON_STATE_UP_EVENT | DRV_APP_BUTTON_STATE_UP;
+        
+        drv_app_kb_id idx = [self drv_ctx]->keycode_map[kc];
+        [self drv_ctx]->key_state[idx] = b;
+        
+        [self drv_ctx]->events |= DRV_APP_EVENT_INPUT;
+}
+
+- (CALayer *)makeBackingLayer
+{
+        Class layer_class = NSClassFromString(@"CAMetalLayer");
+        
+        return [layer_class layer];
+}
+@end
 
 
 drv_app_result
@@ -215,6 +252,7 @@ drv_app_ctx_create(
         mview.wantsLayer       = YES;
         mview.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
         ctx->metal_view        = mview;
+        mview.drv_ctx = ctx;
         
         [window setContentView:ctx->metal_view];
 
@@ -224,6 +262,73 @@ drv_app_ctx_create(
 
         [NSApp activateIgnoringOtherApps:YES];
         [window makeKeyAndOrderFront:nil];
+
+        /* input */
+        /* https://stackoverflow.com/questions/3202629/where-can-i-find-a-list-of-mac-virtual-key-codes */
+        
+        ctx->keycode_map[0x00] = DRV_APP_KB_A;
+        ctx->keycode_map[0x0B] = DRV_APP_KB_B;
+        ctx->keycode_map[0x08] = DRV_APP_KB_C;
+        ctx->keycode_map[0x02] = DRV_APP_KB_D;
+        ctx->keycode_map[0x0E] = DRV_APP_KB_E;
+        ctx->keycode_map[0x03] = DRV_APP_KB_F;
+        ctx->keycode_map[0x05] = DRV_APP_KB_G;
+        ctx->keycode_map[0x04] = DRV_APP_KB_H;
+        ctx->keycode_map[0x22] = DRV_APP_KB_I;
+        ctx->keycode_map[0x26] = DRV_APP_KB_J;
+        ctx->keycode_map[0x28] = DRV_APP_KB_K;
+        ctx->keycode_map[0x25] = DRV_APP_KB_L;
+        ctx->keycode_map[0x2E] = DRV_APP_KB_M;
+        ctx->keycode_map[0x2D] = DRV_APP_KB_N;
+        ctx->keycode_map[0x1F] = DRV_APP_KB_O;
+        ctx->keycode_map[0x23] = DRV_APP_KB_P;
+        ctx->keycode_map[0x0C] = DRV_APP_KB_Q;
+        ctx->keycode_map[0x0F] = DRV_APP_KB_R;
+        ctx->keycode_map[0x01] = DRV_APP_KB_S;
+        ctx->keycode_map[0x11] = DRV_APP_KB_T;
+        ctx->keycode_map[0x20] = DRV_APP_KB_U;
+        ctx->keycode_map[0x09] = DRV_APP_KB_V;
+        ctx->keycode_map[0x0D] = DRV_APP_KB_W;
+        ctx->keycode_map[0x07] = DRV_APP_KB_X;
+        ctx->keycode_map[0x10] = DRV_APP_KB_Y;
+        ctx->keycode_map[0x06] = DRV_APP_KB_Z;
+
+        ctx->keycode_map[0x12] = DRV_APP_KB_1;
+        ctx->keycode_map[0x13] = DRV_APP_KB_2;
+        ctx->keycode_map[0x14] = DRV_APP_KB_3;
+        ctx->keycode_map[0x15] = DRV_APP_KB_4;
+        ctx->keycode_map[0x17] = DRV_APP_KB_5;
+        ctx->keycode_map[0x16] = DRV_APP_KB_6;
+        ctx->keycode_map[0x1A] = DRV_APP_KB_7;
+        ctx->keycode_map[0x1C] = DRV_APP_KB_8;
+        ctx->keycode_map[0x19] = DRV_APP_KB_9;
+        ctx->keycode_map[0x1D] = DRV_APP_KB_0;
+
+        ctx->keycode_map[0x7E] = DRV_APP_KB_UP;
+        ctx->keycode_map[0x7D] = DRV_APP_KB_DOWN;
+        ctx->keycode_map[0x7B] = DRV_APP_KB_LEFT;
+        ctx->keycode_map[0x7C] = DRV_APP_KB_RIGHT;
+        
+        ctx->keycode_map[0x7A] = DRV_APP_KB_F1;
+        ctx->keycode_map[0x78] = DRV_APP_KB_F2;
+        ctx->keycode_map[0x63] = DRV_APP_KB_F3;
+        ctx->keycode_map[0x76] = DRV_APP_KB_F4;
+        ctx->keycode_map[0x60] = DRV_APP_KB_F5;
+        ctx->keycode_map[0x61] = DRV_APP_KB_F6;
+        ctx->keycode_map[0x62] = DRV_APP_KB_F7;
+        ctx->keycode_map[0x64] = DRV_APP_KB_F8;
+        ctx->keycode_map[0x65] = DRV_APP_KB_F9;
+        ctx->keycode_map[0x6D] = DRV_APP_KB_F10;
+        ctx->keycode_map[0x67] = DRV_APP_KB_F11;
+        ctx->keycode_map[0x6F] = DRV_APP_KB_F12;
+        
+        ctx->keycode_map[0x35] = DRV_APP_KB_ESC;
+        ctx->keycode_map[0x31] = DRV_APP_KB_SPACE;
+        
+        int i;
+        for(i = 0; i < DRV_APP_KB_COUNT; ++i) {
+                ctx->key_state[i] = DRV_APP_BUTTON_STATE_UP;
+        }
 
         *out_ctx = ctx;
     
@@ -283,10 +388,15 @@ drv_app_ctx_process(
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
         
-        (void)out_events;
+        /* remove key events */
+        int i;
+        for(i = 0; i < DRV_APP_KB_COUNT; ++i) {
+                ctx->key_state[i] &= ~(DRV_APP_BUTTON_STATE_UP_EVENT);
+                ctx->key_state[i] &= ~(DRV_APP_BUTTON_STATE_DOWN_EVENT);
+        }
         
         /* app event process */
-        NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+        NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
         NSDate *past = [NSDate distantPast];
 
         /* process events */
@@ -309,6 +419,12 @@ drv_app_ctx_process(
                 ctx->window_delegate->try_close = 0;
                 return DRV_APP_RESULT_FAIL;
         }
+        
+        if(out_events) {
+                *out_events = ctx->events;
+        }
+        
+        ctx->events = 0;
 
         return DRV_APP_RESULT_OK;
 }
@@ -328,9 +444,34 @@ drv_app_data_get(
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
-
-        data->layer = (void*)ctx->metal_layer;
+        
+        data->view = (void*)ctx->metal_layer;
+        
         data->gpu_device = ctx->gpu_device;
 
+        return DRV_APP_RESULT_OK;
+}
+
+
+/* ----------------------------------------------------------------- Input -- */
+
+
+drv_app_result
+drv_app_input_data_get(
+        struct drv_app_ctx *ctx,
+        uint8_t **key_data)
+{
+        if(DRV_APP_PCHECK && !ctx) {
+                assert(!"DRV_APP_RESULT_BAD_PARAMS");
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
+        
+        if(DRV_APP_PCHECK && !key_data) {
+                assert(!"DRV_APP_RESULT_BAD_PARAMS");
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
+        
+        *key_data = ctx->key_state;
+        
         return DRV_APP_RESULT_OK;
 }

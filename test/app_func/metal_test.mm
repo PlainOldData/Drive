@@ -15,7 +15,7 @@ struct metal_vtx {
 
 
 id<MTLDevice> metal_device;
-vector_float4 color_offset = { 0 };
+vector_float4 color_offset = {0};
 CAMetalLayer * metal_layer = 0;
 id<MTLCommandQueue> cmd_queue;
 id<MTLRenderPipelineState> pipeline;
@@ -143,14 +143,16 @@ void test_tick()
         id<CAMetalDrawable> drawable = [metal_layer nextDrawable];
 
         if(drawable == nil) {
-        NSLog(@"drawable == nil");
+                NSLog(@"drawable == nil");
         }
-
+        
         id<MTLTexture> texture = drawable.texture;
 
         id<MTLCommandBuffer> cmd_buf = [cmd_queue commandBuffer];
 
-        MTLRenderPassDescriptor * render_desc = [MTLRenderPassDescriptor renderPassDescriptor];
+        MTLRenderPassDescriptor * render_desc =
+                [MTLRenderPassDescriptor renderPassDescriptor];
+        
         render_desc.colorAttachments[0].texture     = texture;
         render_desc.colorAttachments[0].loadAction  = MTLLoadActionClear;
         render_desc.colorAttachments[0].storeAction = MTLStoreActionStore;
