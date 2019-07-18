@@ -157,10 +157,12 @@ typedef enum _drv_app_kb_id {
         /* others */
         
         DRV_APP_KB_ESC, DRV_APP_KB_SPACE,
+        DRV_APP_KB_LSHIFT, DRV_APP_KB_RSHIFT,
+        DRV_APP_KB_LCTRL, DRV_APP_KB_RCTRL,
         
         /* count */
         
-        DRV_APP_KB_COUNT,
+        DRV_APP_KB_COUNT
 
 } drv_app_kb_id;
 
@@ -172,9 +174,36 @@ typedef enum _drv_app_kb_id {
  * returns DRV_APP_RESULT_OK on success.
  */
 drv_app_result
-drv_app_input_data_get(
+drv_app_input_kb_data_get(
         struct drv_app_ctx *ctx,
-        uint8_t **key_data); /* Valid for lifetime of app - ANSI US keys */
+        uint8_t **key_data); /* Valid for lifetime of app */
+        
+        
+typedef enum _drv_app_ms_key_id {
+        DRV_APP_MS_KEY_LEFT,
+        DRV_APP_MS_KEY_MIDDLE,
+        DRV_APP_MS_KEY_RIGHT,
+        
+        /* count */
+        
+        DRV_APP_MS_KEY_COUNT
+} drv_app_ms_key_id;
+        
+        
+struct drv_app_mouse_data {
+        float dx;
+        float dy;
+        
+        float x;
+        float y;
+        
+        uint8_t buttons[DRV_APP_MS_KEY_COUNT];
+};
+
+drv_app_result
+drv_app_input_ms_data_get(
+        struct drv_app_ctx *ctx,
+        struct drv_app_mouse_data **ms_data); /* Valid for lifetime of app */
 
 
 /* ------------------------------------------------------------------ Data -- */

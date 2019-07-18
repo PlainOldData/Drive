@@ -56,6 +56,18 @@
         return NO;
 }
 
+
+- (void)windowDidMove:(NSNotification *)notification
+{
+        (void)notification;
+}
+
+
+- (void)windowDidResize:(NSNotification *)notification
+{
+        (void)notification;
+}
+
 @end
 
 @interface macos_metal_view : NSView {}
@@ -91,10 +103,9 @@ struct drv_app_ctx {
         
         int width, height;
         
-        #ifdef __APPLE__
         size_t keycode_map[0xFF];
-        #endif
         uint8_t key_state[DRV_APP_KB_COUNT];
+        struct drv_app_mouse_data ms_state;
         
         NSAutoreleasePool* app_pool;
 };
@@ -117,7 +128,6 @@ struct drv_app_ctx {
         
         drv_app_kb_id idx = [self drv_ctx]->keycode_map[kc];
         [self drv_ctx]->key_state[idx] = b;
-        
         [self drv_ctx]->events |= DRV_APP_EVENT_INPUT;
 }
 
@@ -129,7 +139,56 @@ struct drv_app_ctx {
         
         drv_app_kb_id idx = [self drv_ctx]->keycode_map[kc];
         [self drv_ctx]->key_state[idx] = b;
+        [self drv_ctx]->events |= DRV_APP_EVENT_INPUT;
+}
+
+- (void)mouseMoved:(NSEvent *)event
+{
+        CGFloat dx = [event deltaX];
+        CGFloat dy = [event deltaY];
+        NSPoint pt = [event locationInWindow];
         
+        [self drv_ctx]->ms_state.dx = dx;
+        [self drv_ctx]->ms_state.dy = dy;
+        [self drv_ctx]->ms_state.x  = pt.x;
+        [self drv_ctx]->ms_state.y  = pt.y;
+        
+        [self drv_ctx]->events |= DRV_APP_EVENT_INPUT;
+}
+
+- (void)mouseDown:(NSEvent *)event
+{
+        (void)event;
+
+        uint8_t b = DRV_APP_BUTTON_STATE_DOWN_EVENT | DRV_APP_BUTTON_STATE_DOWN;
+        [self drv_ctx]->ms_state.buttons[DRV_APP_MS_KEY_LEFT] = b;
+        [self drv_ctx]->events |= DRV_APP_EVENT_INPUT;
+}
+
+-(void)mouseUp:(NSEvent *)event
+{
+        (void)event;
+
+        uint8_t b = DRV_APP_BUTTON_STATE_UP_EVENT | DRV_APP_BUTTON_STATE_UP;
+        [self drv_ctx]->ms_state.buttons[DRV_APP_MS_KEY_LEFT] = b;
+        [self drv_ctx]->events |= DRV_APP_EVENT_INPUT;
+}
+
+- (void)rightMouseDown:(NSEvent *)event
+{
+        (void)event;
+
+        uint8_t b = DRV_APP_BUTTON_STATE_DOWN_EVENT | DRV_APP_BUTTON_STATE_DOWN;
+        [self drv_ctx]->ms_state.buttons[DRV_APP_MS_KEY_RIGHT] = b;
+        [self drv_ctx]->events |= DRV_APP_EVENT_INPUT;
+}
+
+-(void)rightMouseUp:(NSEvent *)event
+{
+        (void)event;
+
+        uint8_t b = DRV_APP_BUTTON_STATE_UP_EVENT | DRV_APP_BUTTON_STATE_UP;
+        [self drv_ctx]->ms_state.buttons[DRV_APP_MS_KEY_RIGHT] = b;
         [self drv_ctx]->events |= DRV_APP_EVENT_INPUT;
 }
 
@@ -237,6 +296,7 @@ drv_app_ctx_create(
         [window autorelease];
         [window cascadeTopLeftFromPoint:NSMakePoint(20, 20)];
         [window setTitle:app_name];
+        [window setAcceptsMouseMovedEvents:YES];
 
         macos_window_delegate * window_delegate = 0;
         window_delegate = [macos_window_delegate alloc];
@@ -256,8 +316,8 @@ drv_app_ctx_create(
         
         [window setContentView:ctx->metal_view];
 
-        ctx->metal_layer = (CAMetalLayer *)[ctx->metal_view layer];
-        ctx->metal_layer.device = desc->gpu_device;
+        ctx->metal_layer             = (CAMetalLayer *)[ctx->metal_view layer];
+        ctx->metal_layer.device      = desc->gpu_device;
         ctx->metal_layer.pixelFormat = ctx->metal_layer.pixelFormat;
 
         [NSApp activateIgnoringOtherApps:YES];
@@ -324,10 +384,18 @@ drv_app_ctx_create(
         
         ctx->keycode_map[0x35] = DRV_APP_KB_ESC;
         ctx->keycode_map[0x31] = DRV_APP_KB_SPACE;
+        ctx->keycode_map[0x38] = DRV_APP_KB_LSHIFT;
+        ctx->keycode_map[0x3C] = DRV_APP_KB_RSHIFT;
+        ctx->keycode_map[0x3B] = DRV_APP_KB_LCTRL;
+        ctx->keycode_map[0x3E] = DRV_APP_KB_RCTRL;
         
         int i;
         for(i = 0; i < DRV_APP_KB_COUNT; ++i) {
                 ctx->key_state[i] = DRV_APP_BUTTON_STATE_UP;
+        }
+        
+        for(i = 0; i < DRV_APP_MS_KEY_COUNT; ++i) {
+                ctx->ms_state.buttons[i] = DRV_APP_BUTTON_STATE_UP;
         }
 
         *out_ctx = ctx;
@@ -370,9 +438,9 @@ process_next_evt(NSDate *date)
         NSEvent *evt = 0;
         
         evt = [NSApp nextEventMatchingMask:NSEventMaskAny
-                        untilDate:date
-                        inMode:NSDefaultRunLoopMode
-                        dequeue:YES];
+                                 untilDate:date
+                                    inMode:NSDefaultRunLoopMode
+                                   dequeue:YES];
         
         return evt;
 }
@@ -393,6 +461,11 @@ drv_app_ctx_process(
         for(i = 0; i < DRV_APP_KB_COUNT; ++i) {
                 ctx->key_state[i] &= ~(DRV_APP_BUTTON_STATE_UP_EVENT);
                 ctx->key_state[i] &= ~(DRV_APP_BUTTON_STATE_DOWN_EVENT);
+        }
+        
+        for(i = 0; i < DRV_APP_MS_KEY_COUNT; ++i) {
+                ctx->ms_state.buttons[i] &= ~(DRV_APP_BUTTON_STATE_UP_EVENT);
+                ctx->ms_state.buttons[i] &= ~(DRV_APP_BUTTON_STATE_DOWN_EVENT);
         }
         
         /* app event process */
@@ -457,7 +530,7 @@ drv_app_data_get(
 
 
 drv_app_result
-drv_app_input_data_get(
+drv_app_input_kb_data_get(
         struct drv_app_ctx *ctx,
         uint8_t **key_data)
 {
@@ -472,6 +545,27 @@ drv_app_input_data_get(
         }
         
         *key_data = ctx->key_state;
+        
+        return DRV_APP_RESULT_OK;
+}
+
+
+drv_app_result
+drv_app_input_ms_data_get(
+        struct drv_app_ctx *ctx,
+        struct drv_app_mouse_data **ms_data)
+{
+        if(DRV_APP_PCHECK && !ctx) {
+                assert(!"DRV_APP_RESULT_BAD_PARAMS");
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
+        
+        if(DRV_APP_PCHECK && !ms_data) {
+                assert(!"DRV_APP_RESULT_BAD_PARAMS");
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
+        
+        *ms_data = &ctx->ms_state;
         
         return DRV_APP_RESULT_OK;
 }
