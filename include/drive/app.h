@@ -58,6 +58,7 @@ typedef enum _drv_app_gpu_device_id {
 
 
 /*
+ * returns DRV_APP_RESULT_BAD_PARAMS if ctx is null,
  * returns DRV_APP_RESULT_BAD_PARAMS if device is not recognized.
  * returns DRV_APP_RESULT_OK on success.
  */
@@ -212,7 +213,6 @@ drv_app_input_ms_data_get(
 #ifdef _WIN32
 struct drv_app_data {
         void *hwnd;
-        void *gpu_device;
 };
 #endif
 

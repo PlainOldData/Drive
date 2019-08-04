@@ -12,6 +12,9 @@
 #include <assert.h>
 #include <windows.h>
 #include <Shellapi.h>
+#include <d3d12.h>
+#include <dxgi.h>
+#include <dxgi1_4.h>
 
 
 /* ---------------------------------------------------------------- Config -- */
@@ -29,6 +32,13 @@ struct drv_app_ctx {
         HWND hwnd;
         HINSTANCE hinstance;
         HDC hdc;
+
+        uint64_t events;
+
+        /* input */
+
+        size_t keycode_map[0xFF];
+        uint8_t key_state[DRV_APP_KB_COUNT];
 };
 
 
@@ -142,6 +152,36 @@ internal_wnd_proc(HWND hWnd, UINT u_msg, WPARAM w_param, LPARAM l_param)
                 break;
         }
 
+        case WM_KEYDOWN: {
+                if(ctx) {
+                        SHORT kc = (SHORT)w_param;
+                        uint8_t b =
+                                DRV_APP_BUTTON_STATE_DOWN_EVENT |
+                                DRV_APP_BUTTON_STATE_DOWN;
+
+                        size_t idx = ctx->keycode_map[kc];
+                        ctx->key_state[idx] = b;
+                        ctx->events |= DRV_APP_EVENT_INPUT;
+                }
+
+                break;
+        }
+
+        case WM_KEYUP: {
+                if(ctx) {
+                        SHORT kc = (SHORT)w_param;
+                        uint8_t b =
+                                DRV_APP_BUTTON_STATE_UP_EVENT |
+                                DRV_APP_BUTTON_STATE_UP;
+
+                        drv_app_kb_id idx = (drv_app_kb_id)ctx->keycode_map[kc];
+                        ctx->key_state[idx] = b;
+                        ctx->events |= DRV_APP_EVENT_INPUT;
+                }
+
+                break;
+        }
+
         case WM_CHAR: {
                 if(ctx) {
                         //SHORT c16 = (SHORT)w_param;
@@ -158,6 +198,8 @@ internal_wnd_proc(HWND hWnd, UINT u_msg, WPARAM w_param, LPARAM l_param)
                         //                ctx->chars[ctx->char_count] = 0;
                         //        }
                         //}
+
+
                 }
 
                 break;
@@ -179,6 +221,7 @@ drv_app_ctx_create(
         struct drv_app_ctx **out)
 {
         /* param check */
+
         if(DRV_APP_PCHECKS && !desc) {
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
@@ -190,6 +233,7 @@ drv_app_ctx_create(
         }
 
         /* alloc ctx */
+
         drv_app_alloc_fn alloc_fn = malloc;
         drv_app_free_fn free_fn = free;
 
@@ -201,6 +245,7 @@ drv_app_ctx_create(
         struct drv_app_ctx *ctx = (struct drv_app_ctx*)alloc_fn(sizeof(*ctx));
 
         /* register class */
+
         WNDCLASSA wc;
         memset(&wc, 0, sizeof(wc));
 
@@ -235,6 +280,7 @@ drv_app_ctx_create(
         AdjustWindowRectEx(&rect, dw_style, FALSE, dw_ex_style);
 
         /* create window */
+
         ctx->hwnd = CreateWindowExA(
                 dw_ex_style,
                 wc.lpszClassName,
@@ -260,14 +306,91 @@ drv_app_ctx_create(
 
         if(ctx->hwnd) {
                 ctx->hdc = GetDC(ctx->hwnd);
-                //ctx->glrc = win32_create_gl_context(ctx->hwnd, ctx->dc);
+        }
+
+        /* input */
+        /* https://docs.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes */
+
+        ctx->keycode_map[0x41] = DRV_APP_KB_A;
+        ctx->keycode_map[0x42] = DRV_APP_KB_B;
+        ctx->keycode_map[0x43] = DRV_APP_KB_C;
+        ctx->keycode_map[0x44] = DRV_APP_KB_D;
+        ctx->keycode_map[0x45] = DRV_APP_KB_E;
+        ctx->keycode_map[0x46] = DRV_APP_KB_F;
+        ctx->keycode_map[0x47] = DRV_APP_KB_G;
+        ctx->keycode_map[0x48] = DRV_APP_KB_H;
+        ctx->keycode_map[0x49] = DRV_APP_KB_I;
+        ctx->keycode_map[0x4A] = DRV_APP_KB_J;
+        ctx->keycode_map[0x4B] = DRV_APP_KB_K;
+        ctx->keycode_map[0x4C] = DRV_APP_KB_L;
+        ctx->keycode_map[0x4D] = DRV_APP_KB_M;
+        ctx->keycode_map[0x4E] = DRV_APP_KB_N;
+        ctx->keycode_map[0x4F] = DRV_APP_KB_O;
+        ctx->keycode_map[0x50] = DRV_APP_KB_P;
+        ctx->keycode_map[0x51] = DRV_APP_KB_Q;
+        ctx->keycode_map[0x52] = DRV_APP_KB_R;
+        ctx->keycode_map[0x53] = DRV_APP_KB_S;
+        ctx->keycode_map[0x54] = DRV_APP_KB_T;
+        ctx->keycode_map[0x55] = DRV_APP_KB_U;
+        ctx->keycode_map[0x56] = DRV_APP_KB_V;
+        ctx->keycode_map[0x57] = DRV_APP_KB_W;
+        ctx->keycode_map[0x58] = DRV_APP_KB_X;
+        ctx->keycode_map[0x59] = DRV_APP_KB_Y;
+        ctx->keycode_map[0x5A] = DRV_APP_KB_Z;
+
+        ctx->keycode_map[0x31] = DRV_APP_KB_1;
+        ctx->keycode_map[0x32] = DRV_APP_KB_2;
+        ctx->keycode_map[0x33] = DRV_APP_KB_3;
+        ctx->keycode_map[0x34] = DRV_APP_KB_4;
+        ctx->keycode_map[0x35] = DRV_APP_KB_5;
+        ctx->keycode_map[0x36] = DRV_APP_KB_6;
+        ctx->keycode_map[0x37] = DRV_APP_KB_7;
+        ctx->keycode_map[0x38] = DRV_APP_KB_8;
+        ctx->keycode_map[0x39] = DRV_APP_KB_9;
+        ctx->keycode_map[0x30] = DRV_APP_KB_0;
+
+        ctx->keycode_map[0x26] = DRV_APP_KB_UP;
+        ctx->keycode_map[0x28] = DRV_APP_KB_DOWN;
+        ctx->keycode_map[0x25] = DRV_APP_KB_LEFT;
+        ctx->keycode_map[0x27] = DRV_APP_KB_RIGHT;
+        
+        ctx->keycode_map[0x70] = DRV_APP_KB_F1;
+        ctx->keycode_map[0x71] = DRV_APP_KB_F2;
+        ctx->keycode_map[0x72] = DRV_APP_KB_F3;
+        ctx->keycode_map[0x73] = DRV_APP_KB_F4;
+        ctx->keycode_map[0x74] = DRV_APP_KB_F5;
+        ctx->keycode_map[0x75] = DRV_APP_KB_F6;
+        ctx->keycode_map[0x76] = DRV_APP_KB_F7;
+        ctx->keycode_map[0x77] = DRV_APP_KB_F8;
+        ctx->keycode_map[0x78] = DRV_APP_KB_F9;
+        ctx->keycode_map[0x79] = DRV_APP_KB_F10;
+        ctx->keycode_map[0x7A] = DRV_APP_KB_F11;
+        ctx->keycode_map[0x7B] = DRV_APP_KB_F12;
+        
+        ctx->keycode_map[0x1B] = DRV_APP_KB_ESC;
+        ctx->keycode_map[0x20] = DRV_APP_KB_SPACE;
+        ctx->keycode_map[0xA0] = DRV_APP_KB_LSHIFT;
+        ctx->keycode_map[0xAA] = DRV_APP_KB_RSHIFT;
+        ctx->keycode_map[0xA2] = DRV_APP_KB_LCTRL;
+        ctx->keycode_map[0xA3] = DRV_APP_KB_RCTRL;
+
+        int i;
+        for(i = 0; i < DRV_APP_KB_COUNT; ++i) {
+                ctx->key_state[i] = DRV_APP_BUTTON_STATE_UP;
+        }
+        
+        for(i = 0; i < DRV_APP_MS_KEY_COUNT; ++i) {
+                //ctx->ms_state.buttons[i] = DRV_APP_BUTTON_STATE_UP;
         }
 
         /* display window */
+
         ShowWindow(ctx->hwnd, SW_SHOW);
         SetForegroundWindow(ctx->hwnd);
         SetFocus(ctx->hwnd);
         SetPropA(ctx->hwnd, "drive_app_ctx", ctx);
+
+        /* finish up */
 
         *out = ctx;
 
@@ -293,12 +416,34 @@ drv_app_ctx_process(
         struct drv_app_ctx *ctx,
         uint64_t *out_events)
 {
-        uint64_t events = 0;
+        /* param checks */
+
+        if(DRV_APP_PCHECKS && !ctx) {
+                assert(!"DRV_APP_RESULT_BAD_PARAMS");
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
+
+        /* setup */
+        
+        ctx->events = 0;
+
+        /* remove key events */
+
+        int i;
+        for(i = 0; i < DRV_APP_KB_COUNT; ++i) {
+                ctx->key_state[i] &= ~(DRV_APP_BUTTON_STATE_UP_EVENT);
+                ctx->key_state[i] &= ~(DRV_APP_BUTTON_STATE_DOWN_EVENT);
+        }
+        
+        for(i = 0; i < DRV_APP_MS_KEY_COUNT; ++i) {
+                //ctx->ms_state.buttons[i] &= ~(DRV_APP_BUTTON_STATE_UP_EVENT);
+                //ctx->ms_state.buttons[i] &= ~(DRV_APP_BUTTON_STATE_DOWN_EVENT);
+        }
 
         /* process messages */
+
         MSG msg;
 
-        /* handle messages we care about! */
         while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
                 switch (msg.message) {
                 /*
@@ -319,6 +464,11 @@ drv_app_ctx_process(
         }
 
         /* return success */
+
+        if(out_events) {
+                *out_events = ctx->events;
+        }
+
         return ctx->hwnd ? DRV_APP_RESULT_OK : DRV_APP_RESULT_FAIL;
 }
 
@@ -332,7 +482,7 @@ drv_app_data_get(
         struct drv_app_data *data)
 {
         data->hwnd = ctx->hwnd;
-
+        
         return DRV_APP_RESULT_OK;
 }
 
@@ -341,8 +491,91 @@ drv_app_gpu_device(
         drv_app_gpu_device_id device,
         void **out_device)
 {
-        out_device = 0;
+        /* param checks */
+
+        if(DRV_APP_PCHECKS && device != DRV_APP_GPU_DEVICE_DX12) {
+                assert(!"DRV_APP_RESULT_FAIL");
+                return DRV_APP_RESULT_FAIL;
+        }
+
+        if(DRV_APP_PCHECKS && !out_device) {
+                assert(!"DRV_APP_RESULT_BAD_PARAMS");
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
+
+        /* d3d device */
+
+        static ID3D12Device* dev = 0;
+
+        if(!dev) {
+                D3D_FEATURE_LEVEL fl = D3D_FEATURE_LEVEL_12_1;
+                HRESULT res = D3D12CreateDevice(
+                        NULL,
+                        fl,
+                        __uuidof(ID3D12Device),
+                        (void**)&dev);
+        
+                if(FAILED(res)) {
+                        assert(!"DRV_APP_RESULT_FAIL");
+		        return DRV_APP_RESULT_FAIL;
+	        }
+        }
+
+        if(!dev) {
+                assert(!"DRV_APP_RESULT_FAIL");
+		return DRV_APP_RESULT_FAIL;
+        }
+
+        /* return */
+
+        *out_device = dev;
+
         return DRV_APP_RESULT_OK;
+}
+
+
+/* ----------------------------------------------------------------- Input -- */
+
+
+drv_app_result
+drv_app_input_kb_data_get(
+        struct drv_app_ctx *ctx,
+        uint8_t **key_data)
+{
+        if(DRV_APP_PCHECKS && !ctx) {
+                assert(!"DRV_APP_RESULT_BAD_PARAMS");
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
+        
+        if(DRV_APP_PCHECKS && !key_data) {
+                assert(!"DRV_APP_RESULT_BAD_PARAMS");
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
+        
+        *key_data = ctx->key_state;
+        
+        return DRV_APP_RESULT_OK;
+}
+
+
+drv_app_result
+drv_app_input_ms_data_get(
+        struct drv_app_ctx *ctx,
+        struct drv_app_mouse_data **ms_data)
+{
+        if(DRV_APP_PCHECKS && !ctx) {
+                assert(!"DRV_APP_RESULT_BAD_PARAMS");
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
+        
+        if(DRV_APP_PCHECKS && !ms_data) {
+                assert(!"DRV_APP_RESULT_BAD_PARAMS");
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
+        
+        //*ms_data = &ctx->ms_state;
+        
+        return DRV_APP_RESULT_FAIL;
 }
 
 

@@ -29,25 +29,13 @@ HANDLE m_fenceEvent;
 unsigned long long m_fenceValue;
 
 
-void *
-test_device()
-{
-        D3D_FEATURE_LEVEL fl = D3D_FEATURE_LEVEL_12_1;
-        HRESULT res = D3D12CreateDevice(NULL, fl, __uuidof(ID3D12Device), (void**)&dev);
-
-        if(FAILED(res)) {
-		return nullptr;
-	}
-
-        return dev;
-}
-
-
 int
 test_setup(struct drv_app_ctx *ctx)
 {
         struct drv_app_data app_data = {};
         drv_app_data_get(ctx, &app_data);
+
+        drv_app_gpu_device(DRV_APP_GPU_DEVICE_DX12, (void**)&dev);
 
         HRESULT res; 
 
@@ -302,7 +290,7 @@ test_tick()
 	ID3D12CommandList* ppCommandLists[1];
 	unsigned long long fenceToWaitFor;
 
-        	// Reset (re-use) the memory associated command allocator.
+        // Reset (re-use) the memory associated command allocator.
 	result = m_commandAllocator->Reset();
 	if(FAILED(result))
 	{
@@ -393,6 +381,7 @@ test_tick()
 
         // Alternate the back buffer index back and forth between 0 and 1 each frame.
 	m_bufferIndex == 0 ? m_bufferIndex = 1 : m_bufferIndex = 0;
+
 
 }
 
