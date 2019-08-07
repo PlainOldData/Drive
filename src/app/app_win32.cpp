@@ -353,7 +353,7 @@ drv_app_ctx_create(
         ctx->keycode_map[0x28] = DRV_APP_KB_DOWN;
         ctx->keycode_map[0x25] = DRV_APP_KB_LEFT;
         ctx->keycode_map[0x27] = DRV_APP_KB_RIGHT;
-        
+
         ctx->keycode_map[0x70] = DRV_APP_KB_F1;
         ctx->keycode_map[0x71] = DRV_APP_KB_F2;
         ctx->keycode_map[0x72] = DRV_APP_KB_F3;
@@ -366,7 +366,7 @@ drv_app_ctx_create(
         ctx->keycode_map[0x79] = DRV_APP_KB_F10;
         ctx->keycode_map[0x7A] = DRV_APP_KB_F11;
         ctx->keycode_map[0x7B] = DRV_APP_KB_F12;
-        
+
         ctx->keycode_map[0x1B] = DRV_APP_KB_ESC;
         ctx->keycode_map[0x20] = DRV_APP_KB_SPACE;
         ctx->keycode_map[0xA0] = DRV_APP_KB_LSHIFT;
@@ -378,7 +378,7 @@ drv_app_ctx_create(
         for(i = 0; i < DRV_APP_KB_COUNT; ++i) {
                 ctx->key_state[i] = DRV_APP_BUTTON_STATE_UP;
         }
-        
+
         for(i = 0; i < DRV_APP_MS_KEY_COUNT; ++i) {
                 //ctx->ms_state.buttons[i] = DRV_APP_BUTTON_STATE_UP;
         }
@@ -424,7 +424,7 @@ drv_app_ctx_process(
         }
 
         /* setup */
-        
+
         ctx->events = 0;
 
         /* remove key events */
@@ -434,7 +434,7 @@ drv_app_ctx_process(
                 ctx->key_state[i] &= ~(DRV_APP_BUTTON_STATE_UP_EVENT);
                 ctx->key_state[i] &= ~(DRV_APP_BUTTON_STATE_DOWN_EVENT);
         }
-        
+
         for(i = 0; i < DRV_APP_MS_KEY_COUNT; ++i) {
                 //ctx->ms_state.buttons[i] &= ~(DRV_APP_BUTTON_STATE_UP_EVENT);
                 //ctx->ms_state.buttons[i] &= ~(DRV_APP_BUTTON_STATE_DOWN_EVENT);
@@ -482,7 +482,7 @@ drv_app_data_get(
         struct drv_app_data *data)
 {
         data->hwnd = ctx->hwnd;
-        
+
         return DRV_APP_RESULT_OK;
 }
 
@@ -507,6 +507,8 @@ drv_app_gpu_device(
 
         static ID3D12Device* dev = 0;
 
+        //TODO(Albert): Create DX device!!
+#if 0
         if(!dev) {
                 D3D_FEATURE_LEVEL fl = D3D_FEATURE_LEVEL_12_1;
                 HRESULT res = D3D12CreateDevice(
@@ -514,7 +516,7 @@ drv_app_gpu_device(
                         fl,
                         __uuidof(ID3D12Device),
                         (void**)&dev);
-        
+
                 if(FAILED(res)) {
                         assert(!"DRV_APP_RESULT_FAIL");
 		        return DRV_APP_RESULT_FAIL;
@@ -525,6 +527,7 @@ drv_app_gpu_device(
                 assert(!"DRV_APP_RESULT_FAIL");
 		return DRV_APP_RESULT_FAIL;
         }
+#endif
 
         /* return */
 
@@ -546,14 +549,14 @@ drv_app_input_kb_data_get(
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
-        
+
         if(DRV_APP_PCHECKS && !key_data) {
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
-        
+
         *key_data = ctx->key_state;
-        
+
         return DRV_APP_RESULT_OK;
 }
 
@@ -567,14 +570,14 @@ drv_app_input_ms_data_get(
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
-        
+
         if(DRV_APP_PCHECKS && !ms_data) {
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
-        
+
         //*ms_data = &ctx->ms_state;
-        
+
         return DRV_APP_RESULT_FAIL;
 }
 
