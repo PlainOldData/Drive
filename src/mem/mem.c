@@ -80,12 +80,11 @@ struct drv_stack_valloc {
 
 
 struct drv_tag_alloc {
-        int i;
-};
+        char *start;
+        uint64_t *alloc_ids;
 
-
-struct drv_tag_valloc {
-        int i;
+        size_t chunk_count;
+        size_t chunk_bytes;
 };
 
 
@@ -93,7 +92,6 @@ struct drv_mem_ctx {
         struct drv_stack_alloc alloc_stack[DRV_MEM_MAX_STACK_ALLOC];
         struct drv_stack_valloc valloc_stack[DRV_MEM_MAX_STACK_VALLOC];
         struct drv_tag_alloc alloc_tagged[DRV_MEM_MAX_TAGGED_ALLOC];
-        struct drv_tag_valloc valloc_tagged[DRV_MEM_MAX_TAGGED_VALLOC];
 
         drv_mem_alloc_fn alloc_fn;
         drv_mem_free_fn free_fn;
@@ -194,6 +192,13 @@ drv_mem_ctx_destroy(
                         #elif defined(__APPLE__) || (__linux__)
                         
                         #endif
+                }
+
+                for(i = 0; i < DRV_MEM_MAX_TAGGED_ALLOC; ++i) {
+                        if(ctx->alloc_tagged[i].start) {
+                                ctx->free_fn(ctx->alloc_tagged[i].start);
+                                ctx->free_fn(ctx->alloc_tagged[i].alloc_ids);
+                        }
                 }
 
                 ctx->free_fn(ctx);
@@ -639,9 +644,97 @@ drv_mem_tagged_allocator_create(
         struct drv_mem_tagged_allocator_desc *desc,
         uint64_t *allocator_id)
 {
-        (void)ctx;
-        (void)desc;
-        (void)allocator_id;
+        /* param check */
+        if(DRV_MEM_PCHECKS && !ctx) {
+                assert(!"DRV_MEM_RESULT_BAD_PARAM");
+                return DRV_MEM_RESULT_BAD_PARAM;
+        }
+
+        if(DRV_MEM_PCHECKS && !desc) {
+                assert(!"DRV_MEM_RESULT_BAD_PARAM");
+                return DRV_MEM_RESULT_BAD_PARAM;
+        }
+
+        if(DRV_MEM_PCHECKS && !allocator_id) {
+                assert(!"DRV_MEM_RESULT_BAD_PARAM");
+                return DRV_MEM_RESULT_BAD_PARAM;
+        }
+        
+        if(DRV_MEM_PCHECKS && !desc->chunk_size) {
+                assert(!"DRV_MEM_RESULT_INVALID_DESC");
+                return DRV_MEM_RESULT_INVALID_DESC;
+        }
+
+        if(DRV_MEM_PCHECKS && !desc->chunk_count) {
+                assert(!"DRV_MEM_RESULT_INVALID_DESC");
+                return DRV_MEM_RESULT_INVALID_DESC;
+        }
+
+        if(DRV_MEM_PCHECKS && desc->alloc_type != DRV_MEM_ALLOC_TYPE_PHYSICAL) {
+                assert(!"DRV_MEM_RESULT_INVALID_DESC");
+                return DRV_MEM_RESULT_INVALID_DESC;
+        }
+
+        /* physical stack allocator */
+        if(desc->alloc_type == DRV_MEM_ALLOC_TYPE_PHYSICAL) {
+
+                /* find a free allocator */
+                int i;
+                uint32_t idx;
+
+                struct drv_tag_alloc *alloc = 0;
+                
+                for(i = 0; i < DRV_MEM_MAX_TAGGED_ALLOC; ++i) {
+                        if(!ctx->alloc_tagged[i].start) {
+                                alloc = &ctx->alloc_tagged[i];
+                                idx = i;
+
+                                break;
+                        }
+                }
+                
+                if(!alloc) {
+                        assert(!"DRV_MEM_RESULT_FAIL");
+                        return DRV_MEM_RESULT_FAIL;
+                }
+                
+                unsigned count = desc->chunk_count;
+
+                unsigned chunk_bytes = count * desc->chunk_size;
+                void *start          = ctx->alloc_fn(chunk_bytes);
+
+                if(!start) {
+                        assert(!"DRV_MEM_RESULT_FAIL");
+                        return DRV_MEM_RESULT_FAIL;
+                }
+
+                unsigned id_bytes = count * sizeof(alloc->alloc_ids[0]);
+                uint64_t *ids     = ctx->alloc_fn(id_bytes);
+
+                if(!ids) {
+                        assert(!"DRV_MEM_RESULT_FAIL");
+                        return DRV_MEM_RESULT_FAIL;
+                }
+
+                for(i = 0; i < count; ++i) {
+                        ids[i] = 0;
+                }
+
+                /* setup */
+                alloc->start       = start;
+                alloc->alloc_ids   = ids;
+                alloc->chunk_bytes = desc->chunk_size;
+                alloc->chunk_count = count;
+
+                /* allocator ID */
+                uint64_t alloc_type = DRV_MEM_ALLOC_TAGGED;
+                uint32_t alloc_idx  = idx;
+                uint64_t alloc_id   = (alloc_type << 32) | alloc_idx;
+                
+                *allocator_id = alloc_id;
+                
+                return DRV_MEM_RESULT_OK;
+        }
 
         return DRV_MEM_RESULT_FAIL;
 }
@@ -652,12 +745,69 @@ drv_mem_tagged_alloc(
         struct drv_mem_ctx *ctx,
         uint64_t alloc_id,
         uint64_t tag_id,
-        size_t bytes)
+        void **out_mem,
+        size_t *out_bytes)
 {
-        (void)ctx;
-        (void)alloc_id;
-        (void)tag_id;
-        (void)bytes;
+        /* param check */
+        if(DRV_MEM_PCHECKS && !ctx) {
+                assert(!"DRV_MEM_RESULT_BAD_PARAM");
+                return DRV_MEM_RESULT_BAD_PARAM;
+        }
+
+        if(DRV_MEM_PCHECKS && !alloc_id) {
+                assert(!"DRV_MEM_RESULT_BAD_PARAM");
+                return DRV_MEM_RESULT_BAD_PARAM;
+        }
+
+        if(DRV_MEM_PCHECKS && !out_mem) {
+                assert(!"DRV_MEM_RESULT_BAD_PARAM");
+                return DRV_MEM_RESULT_BAD_PARAM;
+        }
+        
+        uint64_t idx = (alloc_id & 0xFFFFFFFF);
+        uint64_t type = ((alloc_id >> 32) & 0xFFFFFFFF);
+        
+        if(type != DRV_MEM_ALLOC_TAGGED && type != DRV_MEM_ALLOC_VTAGGED) {
+                assert(!"DRV_MEM_RESULT_FAIL");
+                return DRV_MEM_RESULT_FAIL;
+        }
+
+        if(type == DRV_MEM_ALLOC_TAGGED) {
+                if(DRV_MEM_PCHECKS && idx >= DRV_MEM_MAX_TAGGED_ALLOC) {
+                        assert(!"DRV_MEM_RESULT_FAIL");
+                        return DRV_MEM_RESULT_FAIL;
+                }
+                
+                /* search for a free space */
+                struct drv_tag_alloc *alloc = &ctx->alloc_tagged[idx];
+                
+                int i;
+                void *addr = 0;
+
+                for(i = 0; i < alloc->chunk_count; ++i) {
+                        uint64_t id = alloc->alloc_ids[i];
+                        if(id == 0) {
+                                unsigned chunk_start = alloc->chunk_bytes * i;
+                                addr = &alloc->start[chunk_start];
+
+                                alloc->alloc_ids[i] = alloc_id;
+
+                                break;
+                        }
+                }
+
+                *out_mem = addr;
+                
+                if (out_bytes) {
+                        *out_bytes = addr ? alloc->chunk_bytes : 0;
+                }
+
+                return DRV_MEM_RESULT_OK;
+        }
+        else {
+                /* vtagged not supported yet */
+                return DRV_MEM_RESULT_FAIL;
+        }
 
         return DRV_MEM_RESULT_FAIL;
 }
@@ -669,9 +819,53 @@ drv_mem_tagged_free(
         uint64_t alloc_id,
         uint64_t tag_id)
 {
-        (void)ctx;
-        (void)alloc_id;
-        (void)tag_id;
+       /* param check */
+        if(DRV_MEM_PCHECKS && !ctx) {
+                assert(!"DRV_MEM_RESULT_BAD_PARAM");
+                return DRV_MEM_RESULT_BAD_PARAM;
+        }
+
+        if(DRV_MEM_PCHECKS && !alloc_id) {
+                assert(!"DRV_MEM_RESULT_BAD_PARAM");
+                return DRV_MEM_RESULT_BAD_PARAM;
+        }
+        
+        uint64_t idx = (alloc_id & 0xFFFFFFFF);
+        uint64_t type = ((alloc_id >> 32) & 0xFFFFFFFF);
+        
+        if(type != DRV_MEM_ALLOC_TAGGED && type != DRV_MEM_ALLOC_VTAGGED) {
+                assert(!"DRV_MEM_RESULT_FAIL");
+                return DRV_MEM_RESULT_FAIL;
+        }
+
+        if(type == DRV_MEM_ALLOC_TAGGED) {
+                if(DRV_MEM_PCHECKS && idx >= DRV_MEM_MAX_TAGGED_ALLOC) {
+                        assert(!"DRV_MEM_RESULT_FAIL");
+                        return DRV_MEM_RESULT_FAIL;
+                }
+                
+                /* clear tag */
+                struct drv_tag_alloc *alloc = &ctx->alloc_tagged[idx];
+                
+                int i;
+                void *addr = 0;
+
+                for(i = 0; i < alloc->chunk_count; ++i) {
+                        uint64_t id = alloc->alloc_ids[i];
+                        if(id == alloc_id) {
+                                unsigned chunk_start = alloc->chunk_bytes * i;
+                                addr = &alloc->start[chunk_start];
+
+                                alloc->alloc_ids[i] = 0;
+                        }
+                }
+
+                return DRV_MEM_RESULT_OK;
+        }
+        else {
+                /* vtagged not supported yet */
+                return DRV_MEM_RESULT_FAIL;
+        }
 
         return DRV_MEM_RESULT_FAIL;
 }

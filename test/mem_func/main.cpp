@@ -10,6 +10,93 @@
 
 
 int
+tagged_phy_test()
+{
+        drv_mem_ctx *ctx = nullptr;
+
+        drv_mem_ctx_create_desc create_desc = {};
+        create_desc.alloc_fn = malloc;
+        create_desc.free_fn  = free;
+
+        drv_mem_result mem_ok = drv_mem_ctx_create(&create_desc, &ctx);
+        if(mem_ok != DRV_MEM_RESULT_OK) {
+                assert(!"Failed to create ctx");
+                return 0;
+        }
+       
+        uint64_t count = 32;
+        size_t chunk_size = 2097152;
+
+        drv_mem_tagged_allocator_desc alloc_desc = {};
+        alloc_desc.alloc_type = DRV_MEM_ALLOC_TYPE_PHYSICAL;
+        alloc_desc.chunk_count = count;
+        alloc_desc.chunk_size = chunk_size;
+
+        uint64_t alloc_id = 0;
+
+        mem_ok = drv_mem_tagged_allocator_create(ctx, &alloc_desc, &alloc_id);
+
+        if(mem_ok != DRV_MEM_RESULT_OK) {
+                assert(!"Failed to create allocator");
+                return 0;
+        }
+
+        if(!alloc_id) {
+                assert(!"Failed to return allocator id");
+                return 0;
+        }
+
+
+        /* fill with data */
+        for(size_t i = 0; i < count; ++i) {
+                void *alloc = nullptr;
+                size_t bytes = 0;
+
+                mem_ok = drv_mem_tagged_alloc(ctx, alloc_id, 1, &alloc, &bytes);
+                
+                if(bytes != chunk_size) {
+                        assert(!"Size's don't match");
+                        return 0;
+                }
+
+                if(!alloc) {
+                        assert(!"No return address");
+                        return 0;
+                }
+
+                if(mem_ok != DRV_MEM_RESULT_OK) {
+                        assert(!"Failed to alloc memory");
+                        return 0;
+                }
+
+                char *data = static_cast<char*>(alloc);
+
+                for (size_t j = 0; j < chunk_size; ++j) {
+                        data[j] = static_cast<char>(i);
+                }
+        }
+
+        /* clear data */
+        mem_ok = drv_mem_tagged_free(ctx, alloc_id, 1);
+
+        if(mem_ok != DRV_MEM_RESULT_OK) {
+                assert(!"Failed to create allocator");
+                return 0;
+        }
+
+        mem_ok = drv_mem_ctx_destroy(&ctx);
+        assert(ctx == nullptr);
+
+        if(mem_ok != DRV_MEM_RESULT_OK) {
+                assert("Failed to free ctx");
+                return 0;
+        }
+
+        return 1;
+}
+
+
+int
 stack_virt_test()
 {
         drv_mem_ctx *ctx = nullptr;
@@ -293,9 +380,10 @@ main() {
         };
         
         test_data tests[] = {
-                {"general_test", general_test},
-                {"stack_phy_test", stack_phy_test},
-                {"stack_virt_test", stack_virt_test},
+                //{"general_test", general_test},
+                //{"stack_phy_test", stack_phy_test},
+                //{"stack_virt_test", stack_virt_test},
+                {"tagged_phy_test", tagged_phy_test},
         };
         
         /* run tests */

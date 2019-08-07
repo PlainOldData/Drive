@@ -16,6 +16,9 @@ extern "C" {
 #endif
 
 
+/* ----------------------------------------------------------------- Types -- */
+
+
 struct drv_mem_ctx; /* opaque */
 
 
@@ -32,6 +35,17 @@ typedef enum _drv_mem_alloc_type {
         DRV_MEM_ALLOC_TYPE_PHYSICAL,
         DRV_MEM_ALLOC_TYPE_VIRTUAL,
 } drv_mem_alloc_type;
+
+
+/* --------------------------------------------------------------- Helpers -- */
+
+
+/*
+ * Moves a pointer along and aligns on 16 byte boundry.
+ * This is useful to split up a buffer of memory.
+ * but its upto the calling code to check boundries.
+ */
+#define DRV_MEM_CONSUME_A16(size, ptr) ((unsigned char*)ptr+16+size-(ptr&0xF))
 
 
 /* -------------------------------------------------------------- Lifetime -- */
@@ -156,6 +170,7 @@ drv_mem_stack_clear(
 struct drv_mem_tagged_allocator_desc {
         unsigned chunk_count;
         unsigned chunk_size;
+        drv_mem_alloc_type alloc_type;
 };
 
 
@@ -171,7 +186,8 @@ drv_mem_tagged_alloc(
         struct drv_mem_ctx *ctx,
         uint64_t alloc_id,
         uint64_t tag_id,
-        size_t bytes);
+        void **out_mem,
+        size_t *out_bytes);
 
 
 drv_mem_result
