@@ -37,7 +37,7 @@ struct drv_app_ctx {
 
         /* input */
 
-        size_t keycode_map[0xFF];
+        drv_app_kb_id keycode_map[0xFF];
         uint8_t key_state[DRV_APP_KB_COUNT];
 };
 
@@ -160,8 +160,11 @@ internal_wnd_proc(HWND hWnd, UINT u_msg, WPARAM w_param, LPARAM l_param)
                                 DRV_APP_BUTTON_STATE_DOWN;
 
                         size_t idx = ctx->keycode_map[kc];
-                        ctx->key_state[idx] = b;
-                        ctx->events |= DRV_APP_EVENT_INPUT;
+
+                        if(idx < DRV_APP_KB_COUNT) {
+                                ctx->key_state[idx] = b;
+                                ctx->events |= DRV_APP_EVENT_INPUT;
+                        }
                 }
 
                 break;
@@ -175,8 +178,11 @@ internal_wnd_proc(HWND hWnd, UINT u_msg, WPARAM w_param, LPARAM l_param)
                                 DRV_APP_BUTTON_STATE_UP;
 
                         drv_app_kb_id idx = (drv_app_kb_id)ctx->keycode_map[kc];
-                        ctx->key_state[idx] = b;
-                        ctx->events |= DRV_APP_EVENT_INPUT;
+                        
+                        if(idx < DRV_APP_KB_COUNT) {
+                                ctx->key_state[idx] = b;
+                                ctx->events |= DRV_APP_EVENT_INPUT;
+                        }
                 }
 
                 break;
@@ -310,6 +316,12 @@ drv_app_ctx_create(
 
         /* input */
         /* https://docs.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes */
+
+        int k;
+
+        for(k = 0; k < 0xFF; ++k) {
+                ctx->keycode_map[k] = DRV_APP_KB_COUNT;
+        }
 
         ctx->keycode_map[0x41] = DRV_APP_KB_A;
         ctx->keycode_map[0x42] = DRV_APP_KB_B;
