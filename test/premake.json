@@ -61,6 +61,23 @@
                         "dependencies" : [
                             "drive_app"
                         ]
+                },
+                {
+                        "name" : "drive_mem_unit_test",
+                        "kind" : "ConsoleApp",
+                        "language" : "C",
+
+                        "files" : [
+                                "./premake.json",
+                                "./mem_unit/**.md",
+                                "./mem_unit/**.h",
+                                "./mem_unit/**.c"
+                        ],
+
+                        "dependencies" : [
+                            "drive_mem",
+                            "utest"
+                        ]
                 }
         ]
 }

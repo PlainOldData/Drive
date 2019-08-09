@@ -7,7 +7,7 @@
 
                         "files" : [
                                 "./premake.json",
-                                "./src/sched/**.md",
+                                "./**.md",
                                 "./src/sched/**.h",
                                 "./src/sched/**.c",
                                 "./include/drive/sched.h"
@@ -45,10 +45,11 @@
 
                         "files" : [
                                 "./premake.json",
-                                "./src/mem/**.md",
+                                "./**.md",
                                 "./src/mem/**.h",
                                 "./src/mem/**.c",
-                                "./include/drive/mem.h"
+                                "./include/drive/mem.h",
+                                "./include/drive/mem/stack.h"
                         ],
 
                     
@@ -64,7 +65,7 @@
 
                         "files" : [
                                 "./premake.json",
-                                "./src/bench/**.md",
+                                "./**.md",
                                 "./src/bench/**.h",
                                 "./src/bench/**.c",
                                 "./include/drive/bench.h"
@@ -86,7 +87,7 @@
 
                         "files" : [
                                 "./premake.json",
-                                "./src/app/**.md"
+                                "./**.md"
                         ],
 
 

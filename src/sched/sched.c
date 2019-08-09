@@ -207,10 +207,6 @@ drv_signal_wait(struct drv_signal *signal, int timeout_ms) {
                         &signal->condition,
                         &signal->mutex, &ts);
                 
-                int i = EINVAL;
-                int j = EINVAL;
-                int k = EPERM;
-                
                 if(ret == ETIMEDOUT)
                 {
                         timed_out = 1;

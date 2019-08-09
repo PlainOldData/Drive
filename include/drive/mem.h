@@ -45,7 +45,12 @@ typedef enum _drv_mem_alloc_type {
  * This is useful to split up a buffer of memory.
  * but its upto the calling code to check boundries.
  */
-#define DRV_MEM_CONSUME_A16(size, ptr) ((unsigned char*)ptr+16+size-(ptr&0xF))
+//#define DRV_MEM_CONSUME_A16(size, ptr) ((unsigned char*)ptr+16+size-(ptr&0xF))
+//#define DRV_MEM_CONSUME_A16(size, ptr) (void*)((unsigned char*)ptr+15+size-((unsigned long)ptr&0xF))
+#define DRV_MEM_CONSUME_A16(size, ptr) (void*)(((unsigned char)ptr+size+15) & ~15)
+#define DRV_MEM_END(size, ptr) (void*)((unsigned char*)ptr + size);
+#define DRV_MEM_INBOUNDS(curr, end) ((unsigned char*)curr < (unsigned char*)end)
+#define DRV_MEM_IS_A16(ptr)((unsigned long)ptr&0xF == 0))
 
 
 /* -------------------------------------------------------------- Lifetime -- */

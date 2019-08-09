@@ -19,6 +19,7 @@
 @interface macos_app_delegate : NSObject<NSApplicationDelegate> {}
 @end
 
+
 @implementation macos_app_delegate
 - (void)applicationDidFinishLaunching:
         (NSNotification *)notification
@@ -124,20 +125,28 @@ struct drv_app_ctx {
 - (void)keyDown:(NSEvent *)event
 {
         UInt16 kc = [event keyCode];
-        uint8_t b = DRV_APP_BUTTON_STATE_DOWN_EVENT | DRV_APP_BUTTON_STATE_DOWN;
-        
         drv_app_kb_id idx = [self drv_ctx]->keycode_map[kc];
-        [self drv_ctx]->key_state[idx] = b;
-        [self drv_ctx]->events |= DRV_APP_EVENT_INPUT;
+        
+        /* stops repeated messages (eg when holding a key down) */
+        if(!([self drv_ctx]->key_state[idx] & DRV_APP_BUTTON_STATE_DOWN)) {
+        
+                uint8_t b =
+                        DRV_APP_BUTTON_STATE_DOWN_EVENT |
+                        DRV_APP_BUTTON_STATE_DOWN;
+                
+                [self drv_ctx]->key_state[idx] = b;
+                [self drv_ctx]->events |= DRV_APP_EVENT_INPUT;
+        }
 }
 
 
 - (void)keyUp:(NSEvent *)event
 {
         UInt16 kc = [event keyCode];
-        uint8_t b = DRV_APP_BUTTON_STATE_UP_EVENT | DRV_APP_BUTTON_STATE_UP;
         
         drv_app_kb_id idx = [self drv_ctx]->keycode_map[kc];
+        
+        uint8_t b = DRV_APP_BUTTON_STATE_UP_EVENT | DRV_APP_BUTTON_STATE_UP;
         [self drv_ctx]->key_state[idx] = b;
         [self drv_ctx]->events |= DRV_APP_EVENT_INPUT;
 }
