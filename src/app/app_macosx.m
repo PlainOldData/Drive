@@ -25,9 +25,9 @@
         (NSNotification *)notification
 {
         (void)notification;
-        
+
         [NSApp stop:nil];
-    
+
         NSEvent *evt = [NSEvent otherEventWithType:NSEventTypeApplicationDefined
                 location:NSMakePoint(0, 0)
                 modifierFlags:0
@@ -37,7 +37,7 @@
                 subtype:0
                 data1:0
                 data2:0];
-        
+
         [NSApp postEvent:evt atStart:YES];
 }
 @end
@@ -52,7 +52,7 @@
         (NSWindow *)sender
 {
         (void)sender;
-        
+
         try_close++;
         return NO;
 }
@@ -79,17 +79,47 @@
 /* -------------------------------------------------------------- Lifetime -- */
 
 
+struct drv_app_gpu_metal {
+        struct drv_app_gpu_device header;
+
+        id<MTLDevice> device;
+};
+
+
 drv_app_result
-drv_app_gpu_device(
+drv_app_gpu_device_create(
         drv_app_gpu_device_id device,
-        void **out_device)
+        uint8_t *device_mem,
+        struct drv_app_gpu_device **out_device)
 {
-        if(device == DRV_APP_GPU_DEVICE_METAL) {
-                *out_device = MTLCreateSystemDefaultDevice();
-                return DRV_APP_RESULT_OK;
+        if(device != DRV_APP_GPU_DEVICE_METAL || !device_mem) {
+                return DRV_APP_RESULT_BAD_PARAMS;
         }
-        
-        return DRV_APP_RESULT_BAD_PARAMS;
+
+        if(DRV_APP_GPU_DEVICE_SIZE < sizeof(struct drv_app_gpu_metal)) {
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
+
+        struct drv_app_gpu_metal *gpu = (struct drv_app_gpu_metal *)mem;
+        memset(gpu, 0, sizeof(*gpu));
+        gpu->header.id = DRV_APP_GPU_DEVICE_METAL;
+
+        gpu->device = MTLCreateSystemDefaultDevice();
+
+        *out_device = (struct drv_app_gpu_device *)gpu;
+        return DRV_APP_RESULT_OK;
+}
+
+
+drv_app_result
+drv_app_gpu_device_destroy(
+        struct drv_app_gpu_device *device)
+{
+        if(device->id != DRV_APP_GPU_DEVICE_METAL) {
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
+
+        return DRV_APP_RESULT_OK;
 }
 
 
@@ -97,17 +127,17 @@ struct drv_app_ctx {
         macos_window_delegate *window_delegate;
         CAMetalLayer * metal_layer;
         macos_metal_view * metal_view;
-        void * gpu_device;
+        struct drv_app_gpu_metal *gpu_device;
         drv_app_free_fn free_fn;
-        
+
         uint64_t events;
-        
+
         int width, height;
-        
+
         size_t keycode_map[0xFF];
         uint8_t key_state[DRV_APP_KB_COUNT];
         struct drv_app_mouse_data ms_state;
-        
+
         NSAutoreleasePool* app_pool;
 };
 
@@ -126,14 +156,14 @@ struct drv_app_ctx {
 {
         UInt16 kc = [event keyCode];
         drv_app_kb_id idx = [self drv_ctx]->keycode_map[kc];
-        
+
         /* stops repeated messages (eg when holding a key down) */
         if(!([self drv_ctx]->key_state[idx] & DRV_APP_BUTTON_STATE_DOWN)) {
-        
+
                 uint8_t b =
                         DRV_APP_BUTTON_STATE_DOWN_EVENT |
                         DRV_APP_BUTTON_STATE_DOWN;
-                
+
                 [self drv_ctx]->key_state[idx] = b;
                 [self drv_ctx]->events |= DRV_APP_EVENT_INPUT;
         }
@@ -143,9 +173,9 @@ struct drv_app_ctx {
 - (void)keyUp:(NSEvent *)event
 {
         UInt16 kc = [event keyCode];
-        
+
         drv_app_kb_id idx = [self drv_ctx]->keycode_map[kc];
-        
+
         uint8_t b = DRV_APP_BUTTON_STATE_UP_EVENT | DRV_APP_BUTTON_STATE_UP;
         [self drv_ctx]->key_state[idx] = b;
         [self drv_ctx]->events |= DRV_APP_EVENT_INPUT;
@@ -156,12 +186,12 @@ struct drv_app_ctx {
         CGFloat dx = [event deltaX];
         CGFloat dy = [event deltaY];
         NSPoint pt = [event locationInWindow];
-        
+
         [self drv_ctx]->ms_state.dx = dx;
         [self drv_ctx]->ms_state.dy = dy;
         [self drv_ctx]->ms_state.x  = pt.x;
         [self drv_ctx]->ms_state.y  = pt.y;
-        
+
         [self drv_ctx]->events |= DRV_APP_EVENT_INPUT;
 }
 
@@ -204,7 +234,7 @@ struct drv_app_ctx {
 - (CALayer *)makeBackingLayer
 {
         Class layer_class = NSClassFromString(@"CAMetalLayer");
-        
+
         return [layer_class layer];
 }
 @end
@@ -220,30 +250,30 @@ drv_app_ctx_create(
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
-        
+
         if(DRV_APP_PCHECK && !out_ctx) {
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
-        
+
         if(DRV_APP_PCHECK && !desc->alloc_fn) {
                 assert(!"DRV_APP_RESULT_INVALID_DESC");
                 return DRV_APP_RESULT_INVALID_DESC;
         }
-        
+
         if(DRV_APP_PCHECK && !desc->gpu_device) {
                 assert(!"DRV_APP_RESULT_INVALID_DESC");
                 return DRV_APP_RESULT_INVALID_DESC;
         }
-        
+
         struct drv_app_ctx *ctx = desc->alloc_fn(sizeof(*ctx));
         memset(ctx, 0, sizeof(*ctx));
-        
-        ctx->gpu_device = desc->gpu_device;
+
+        ctx->gpu_device = (struct drv_app_gpu_metal *)desc->gpu_device;
         ctx->width      = desc->width;
         ctx->height     = desc->height;
         ctx->free_fn    = desc->free_fn;
-        
+
         /* app */
         ctx->app_pool = [[NSAutoreleasePool alloc] init];
         [NSApplication sharedApplication];
@@ -257,18 +287,18 @@ drv_app_ctx_create(
         NSMenu * men_bar = 0;
         men_bar = [[NSMenu alloc] init];
         [men_bar autorelease];
-        
+
         [NSApp setMainMenu:men_bar];
 
         NSMenuItem * men_item = 0;
         men_item = [NSMenuItem alloc];
         [men_item initWithTitle:@"" action:NULL keyEquivalent:@""];
         [men_item autorelease];
-        
+
         [men_bar addItem:men_item];
         NSMenu * app_menu = [[NSMenu alloc] init];
         [app_menu autorelease];
-        
+
         [men_item setSubmenu:app_menu];
 
         NSString * quit_title = 0;
@@ -282,7 +312,7 @@ drv_app_ctx_create(
 
         macos_app_delegate * app_delegate = 0;
         app_delegate = [[[macos_app_delegate alloc] init] autorelease];
-        
+
         [NSApp setDelegate:app_delegate];
         [NSApp run];
 
@@ -294,14 +324,14 @@ drv_app_ctx_create(
                 NSWindowStyleMaskClosable |
                 NSWindowStyleMaskMiniaturizable |
                 NSWindowStyleMaskResizable;
-        
+
         NSWindow * window = 0;
         window = [NSWindow alloc];
         [window initWithContentRect:view_rect
                 styleMask:win_style
                 backing:NSBackingStoreBuffered
                 defer:NO];
-        
+
         [window autorelease];
         [window cascadeTopLeftFromPoint:NSMakePoint(20, 20)];
         [window setTitle:app_name];
@@ -311,7 +341,7 @@ drv_app_ctx_create(
         window_delegate = [macos_window_delegate alloc];
         [window_delegate init];
         [window_delegate autorelease];
-        
+
         [window setDelegate:window_delegate];
         ctx->window_delegate = window_delegate;
 
@@ -322,7 +352,7 @@ drv_app_ctx_create(
         mview.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
         ctx->metal_view        = mview;
         mview.drv_ctx = ctx;
-        
+
         [window setContentView:ctx->metal_view];
 
         ctx->metal_layer             = (CAMetalLayer *)[ctx->metal_view layer];
@@ -334,7 +364,7 @@ drv_app_ctx_create(
 
         /* input */
         /* https://stackoverflow.com/questions/3202629/where-can-i-find-a-list-of-mac-virtual-key-codes */
-        
+
         ctx->keycode_map[0x00] = DRV_APP_KB_A;
         ctx->keycode_map[0x0B] = DRV_APP_KB_B;
         ctx->keycode_map[0x08] = DRV_APP_KB_C;
@@ -377,7 +407,7 @@ drv_app_ctx_create(
         ctx->keycode_map[0x7D] = DRV_APP_KB_DOWN;
         ctx->keycode_map[0x7B] = DRV_APP_KB_LEFT;
         ctx->keycode_map[0x7C] = DRV_APP_KB_RIGHT;
-        
+
         ctx->keycode_map[0x7A] = DRV_APP_KB_F1;
         ctx->keycode_map[0x78] = DRV_APP_KB_F2;
         ctx->keycode_map[0x63] = DRV_APP_KB_F3;
@@ -390,25 +420,25 @@ drv_app_ctx_create(
         ctx->keycode_map[0x6D] = DRV_APP_KB_F10;
         ctx->keycode_map[0x67] = DRV_APP_KB_F11;
         ctx->keycode_map[0x6F] = DRV_APP_KB_F12;
-        
+
         ctx->keycode_map[0x35] = DRV_APP_KB_ESC;
         ctx->keycode_map[0x31] = DRV_APP_KB_SPACE;
         ctx->keycode_map[0x38] = DRV_APP_KB_LSHIFT;
         ctx->keycode_map[0x3C] = DRV_APP_KB_RSHIFT;
         ctx->keycode_map[0x3B] = DRV_APP_KB_LCTRL;
         ctx->keycode_map[0x3E] = DRV_APP_KB_RCTRL;
-        
+
         int i;
         for(i = 0; i < DRV_APP_KB_COUNT; ++i) {
                 ctx->key_state[i] = DRV_APP_BUTTON_STATE_UP;
         }
-        
+
         for(i = 0; i < DRV_APP_MS_KEY_COUNT; ++i) {
                 ctx->ms_state.buttons[i] = DRV_APP_BUTTON_STATE_UP;
         }
 
         *out_ctx = ctx;
-    
+
         return DRV_APP_RESULT_OK;
 }
 
@@ -421,22 +451,22 @@ drv_app_ctx_destroy(
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
-        
+
         if(DRV_APP_PCHECK && !(*destroy)) {
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
-        
+
         struct drv_app_ctx *ctx = *destroy;
-        
+
         [ctx->app_pool drain];
-        
+
         if(ctx->free_fn) {
                 ctx->free_fn(ctx);
         }
-        
+
         *destroy = 0;
-        
+
         return DRV_APP_RESULT_OK;
 }
 
@@ -445,12 +475,12 @@ NSEvent *
 process_next_evt(NSDate *date)
 {
         NSEvent *evt = 0;
-        
+
         evt = [NSApp nextEventMatchingMask:NSEventMaskAny
                                  untilDate:date
                                     inMode:NSDefaultRunLoopMode
                                    dequeue:YES];
-        
+
         return evt;
 }
 
@@ -464,31 +494,31 @@ drv_app_ctx_process(
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
-        
+
         /* remove key events */
         int i;
         for(i = 0; i < DRV_APP_KB_COUNT; ++i) {
                 ctx->key_state[i] &= ~(DRV_APP_BUTTON_STATE_UP_EVENT);
                 ctx->key_state[i] &= ~(DRV_APP_BUTTON_STATE_DOWN_EVENT);
         }
-        
+
         for(i = 0; i < DRV_APP_MS_KEY_COUNT; ++i) {
                 ctx->ms_state.buttons[i] &= ~(DRV_APP_BUTTON_STATE_UP_EVENT);
                 ctx->ms_state.buttons[i] &= ~(DRV_APP_BUTTON_STATE_DOWN_EVENT);
         }
-        
+
         /* app event process */
         NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
         NSDate *past = [NSDate distantPast];
 
         /* process events */
         NSEvent *evt = process_next_evt(past);
-        
+
         while(evt) {
                 [NSApp sendEvent:evt];
                 evt = process_next_evt(past);
         }
-        
+
         CGSize si;
         si.width  = ctx->width;
         si.height = ctx->height;
@@ -501,11 +531,11 @@ drv_app_ctx_process(
                 ctx->window_delegate->try_close = 0;
                 return DRV_APP_RESULT_FAIL;
         }
-        
+
         if(out_events) {
                 *out_events = ctx->events;
         }
-        
+
         ctx->events = 0;
 
         return DRV_APP_RESULT_OK;
@@ -521,15 +551,15 @@ drv_app_data_get(
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
-        
+
         if(DRV_APP_PCHECK && !data) {
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
-        
-        data->view = (void*)ctx->metal_layer;
-        
-        data->gpu_device = ctx->gpu_device;
+
+        memset(data, 0, sizeof(*data));
+        data->metal.view = (void*)ctx->metal_layer;
+        data->metal.device = ctx->gpu_device->device;
 
         return DRV_APP_RESULT_OK;
 }
@@ -547,14 +577,14 @@ drv_app_input_kb_data_get(
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
-        
+
         if(DRV_APP_PCHECK && !key_data) {
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
-        
+
         *key_data = ctx->key_state;
-        
+
         return DRV_APP_RESULT_OK;
 }
 
@@ -568,13 +598,13 @@ drv_app_input_ms_data_get(
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
-        
+
         if(DRV_APP_PCHECK && !ms_data) {
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
-        
+
         *ms_data = &ctx->ms_state;
-        
+
         return DRV_APP_RESULT_OK;
 }

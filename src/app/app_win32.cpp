@@ -9,12 +9,14 @@
 
 #include <drive/app.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <assert.h>
 #include <windows.h>
 #include <Shellapi.h>
+
 #include <d3d12.h>
-#include <dxgi.h>
-#include <dxgi1_4.h>
+#include <dxgi1_6.h>
+#include <d3d12.h>
 
 
 /* ---------------------------------------------------------------- Config -- */
@@ -25,13 +27,28 @@
 #endif
 
 
+#ifndef DRV_APP_ASSERT
+#define __DRV_APP_STRINGIFY(X) #X
+#define DRV_APP_STRINGIFY(X) __DRV_APP_STRINGIFY(X)
+#define DRV_APP_ASSERT(EXPR) if((EXPR)) {} else { if(!IsDebuggerPresent()) { MessageBoxA(0, __FILE__ ":" DRV_APP_STRINGIFY(__LINE__) ": " #EXPR, "ASSERT", MB_OK | MB_ICONERROR); } *((char *)0) = 0; }
+#endif
+
+
+#ifndef DRV_ARRAY_COUNT
+#define DRV_ARRAY_COUNT(ARRAY) (sizeof((ARRAY)) / sizeof((ARRAY)[0]))
+#endif
+
+
 /* -------------------------------------------------------------- Lifetime -- */
 
+struct drv_app_gpu_dx;
 
 struct drv_app_ctx {
         HWND hwnd;
         HINSTANCE hinstance;
         HDC hdc;
+
+        struct drv_app_gpu_dx *gpu;
 
         uint64_t events;
 
@@ -178,7 +195,7 @@ internal_wnd_proc(HWND hWnd, UINT u_msg, WPARAM w_param, LPARAM l_param)
                                 DRV_APP_BUTTON_STATE_UP;
 
                         drv_app_kb_id idx = (drv_app_kb_id)ctx->keycode_map[kc];
-                        
+
                         if(idx < DRV_APP_KB_COUNT) {
                                 ctx->key_state[idx] = b;
                                 ctx->events |= DRV_APP_EVENT_INPUT;
@@ -249,6 +266,12 @@ drv_app_ctx_create(
         }
 
         struct drv_app_ctx *ctx = (struct drv_app_ctx*)alloc_fn(sizeof(*ctx));
+        *ctx = {};
+
+        //TOOD(Albert): Create GPU device if not passed in!!
+        DRV_APP_ASSERT(desc->gpu_device);
+        DRV_APP_ASSERT(desc->gpu_device->id == DRV_APP_GPU_DEVICE_DX12);
+        ctx->gpu = (struct drv_app_gpu_dx *)desc->gpu_device;
 
         /* register class */
 
@@ -487,21 +510,62 @@ drv_app_ctx_process(
 
 /* ------------------------------------------------------------------- App -- */
 
+#define DX_DEBUG 1
+
+#define DX_LOG(FMT, ...) { char tmp[256]; sprintf(tmp, "DX_LOG: " FMT "\n", __VA_ARGS__); OutputDebugStringA(tmp); }
+
+struct drv_app_gpu_dx {
+        struct drv_app_gpu_device header;
+
+        IDXGIFactory4 *factory;
+        IDXGIAdapter4 *adapter;
+        ID3D12Device *device;
+        ID3D12Debug *debug;
+};
 
 drv_app_result
 drv_app_data_get(
         struct drv_app_ctx *ctx,
         struct drv_app_data *data)
 {
-        data->hwnd = ctx->hwnd;
+        *data = {};
+        data->win32.hwnd = ctx->hwnd;
+        if(ctx->gpu)
+        {
+                data->win32.dx.device = ctx->gpu->device;
+                data->win32.dx.factory = ctx->gpu->factory;
+        }
 
         return DRV_APP_RESULT_OK;
 }
 
+static void
+wstr_ascii(WCHAR *src, char *dst) {
+        while(*src)
+        {
+                *dst++ = (char)*src++;
+        }
+        *dst = 0;
+}
+
+static void
+dx_print_adapter_info(IDXGIAdapter1 *adapter) {
+        DXGI_ADAPTER_DESC1 desc;
+        adapter->GetDesc1(&desc);
+
+        char name[DRV_ARRAY_COUNT(desc.Description)];
+        wstr_ascii(desc.Description, name);
+
+        UINT vid_mem = (UINT)(desc.DedicatedVideoMemory / (1024 * 1024));
+
+        DX_LOG("IDXGIAdapter1: %s (%uMb)", name, vid_mem);
+}
+
 drv_app_result
-drv_app_gpu_device(
+drv_app_gpu_device_create(
         drv_app_gpu_device_id device,
-        void **out_device)
+        uint8_t *mem,
+        struct drv_app_gpu_device **out_device)
 {
         /* param checks */
 
@@ -515,39 +579,121 @@ drv_app_gpu_device(
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
 
-        /* d3d device */
+        struct drv_app_gpu_dx *gpu = (struct drv_app_gpu_dx *)mem;
+        *gpu = {};
+        gpu->header.id = device;
 
-        static ID3D12Device* dev = 0;
+        HRESULT ok = S_OK;
 
-        //TODO(Albert): Create DX device!!
-#if 0
-        if(!dev) {
-                D3D_FEATURE_LEVEL fl = D3D_FEATURE_LEVEL_12_1;
-                HRESULT res = D3D12CreateDevice(
-                        NULL,
-                        fl,
-                        __uuidof(ID3D12Device),
-                        (void**)&dev);
-
-                if(FAILED(res)) {
-                        assert(!"DRV_APP_RESULT_FAIL");
-		        return DRV_APP_RESULT_FAIL;
-	        }
-        }
-
-        if(!dev) {
-                assert(!"DRV_APP_RESULT_FAIL");
-		return DRV_APP_RESULT_FAIL;
+#if DX_DEBUG
+        ok = D3D12GetDebugInterface(IID_PPV_ARGS(&gpu->debug));
+        if(ok >= 0 && gpu->debug)
+        {
+                gpu->debug->EnableDebugLayer();
         }
 #endif
 
-        /* return */
+        ok = CreateDXGIFactory2(DX_DEBUG ? DXGI_CREATE_FACTORY_DEBUG : 0, IID_PPV_ARGS(&gpu->factory));
+        DRV_APP_ASSERT(ok >= 0 && gpu->factory);
 
-        *out_device = dev;
+        {
+                UINT adapter_count = 0;
+                IDXGIAdapter1 *adapters[8];
+                for(UINT i = 0; i < DRV_ARRAY_COUNT(adapters); ++i)
+                {
+                        IDXGIAdapter1 *it = 0;
+                        ok = gpu->factory->EnumAdapters1(i, &it);
+                        if(ok == S_OK)
+                        {
+                                adapters[adapter_count++] = it;
+                        }
+                        else
+                        {
+                                break;
+                        }
+                }
+
+                IDXGIAdapter1 *adapter1 = 0;
+                SIZE_T adapter_mem = 0;
+                for(UINT i = 0; i < adapter_count; ++i)
+                {
+                        DXGI_ADAPTER_DESC1 adapter_desc;
+                        adapters[i]->GetDesc1(&adapter_desc);
+
+                        //NOTE(Albert): DX12 only requires at least DX11 features which is why D3D_FEATURE_LEVEL_12_0 is not passed here!
+                        ok = D3D12CreateDevice(adapters[i], D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), 0);
+                        UINT dx12_supported = ok >= 0;
+
+                        if(!(adapter_desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) && dx12_supported)
+                        {
+                                if(adapter_desc.DedicatedVideoMemory > adapter_mem || !adapter1)
+                                {
+                                        adapter1 = adapters[i];
+                                        adapter_mem = adapter_desc.DedicatedVideoMemory;
+                                }
+                        }
+                }
+                DRV_APP_ASSERT(adapter1);
+
+                ok = adapter1->QueryInterface(IID_PPV_ARGS(&gpu->adapter));
+                DRV_APP_ASSERT(ok >= 0 && gpu->adapter);
+
+                for(UINT i = 0; i < adapter_count; ++i)
+                {
+                        adapters[i]->Release(); adapters[i] = 0;
+                }
+        }
+
+        DRV_APP_ASSERT(gpu->adapter);
+        dx_print_adapter_info(gpu->adapter);
+
+        ok = D3D12CreateDevice(gpu->adapter, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&gpu->device));
+        DRV_APP_ASSERT(ok >= 0 && gpu->device);
+
+#if DX_DEBUG
+        {
+                ID3D12InfoQueue *info_queue = 0;
+                ok = gpu->device->QueryInterface(IID_PPV_ARGS(&info_queue));
+                if(ok >= 0 && info_queue)
+                {
+                        info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, TRUE);
+                        info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, TRUE);
+                        info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, TRUE);
+
+                        info_queue->Release(); info_queue = 0;
+                }
+        }
+#endif
+
+        *out_device = (struct drv_app_gpu_device *)gpu;
+        return DRV_APP_RESULT_OK;
+}
+
+drv_app_result
+drv_app_gpu_device_destroy(
+        struct drv_app_gpu_device *device)
+{
+        DRV_APP_ASSERT(device);
+        DRV_APP_ASSERT(device->id == DRV_APP_GPU_DEVICE_DX12);
+
+        struct drv_app_gpu_dx *gpu = (struct drv_app_gpu_dx *)device;
+
+        gpu->device->Release();
+        gpu->adapter->Release();
+        gpu->factory->Release();
+        if(gpu->debug)
+        {
+                gpu->debug->Release();
+        }
+
+        *gpu = {};
 
         return DRV_APP_RESULT_OK;
 }
 
+
+#undef DX_LOG
+#undef DX_DEBUG
 
 /* ----------------------------------------------------------------- Input -- */
 

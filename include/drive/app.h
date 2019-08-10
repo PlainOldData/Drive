@@ -45,6 +45,9 @@ typedef void(*drv_app_free_fn)(void *);
 /* -------------------------------------------------------------- Lifetime -- */
 
 
+#define DRV_APP_GPU_DEVICE_SIZE 64
+
+
 typedef enum _drv_app_gpu_device_id {
         #ifdef _WIN32
         DRV_APP_GPU_DEVICE_DX12,
@@ -57,22 +60,32 @@ typedef enum _drv_app_gpu_device_id {
 } drv_app_gpu_device_id;
 
 
+struct drv_app_gpu_device {
+        drv_app_gpu_device_id id;
+};
+
 /*
  * returns DRV_APP_RESULT_BAD_PARAMS if ctx is null,
  * returns DRV_APP_RESULT_BAD_PARAMS if device is not recognized.
  * returns DRV_APP_RESULT_OK on success.
  */
 drv_app_result
-drv_app_gpu_device(
+drv_app_gpu_device_create(
         drv_app_gpu_device_id device,
-        void **out_device);
+        uint8_t *mem,
+        struct drv_app_gpu_device **out_device);
+
+
+drv_app_result
+drv_app_gpu_device_destroy(
+        struct drv_app_gpu_device *device);
 
 
 struct drv_app_ctx_create_desc {
         int width;
         int height;
         const char *title;
-        void *gpu_device;
+        struct drv_app_gpu_device *gpu_device;
         drv_app_alloc_fn alloc_fn;
         drv_app_free_fn free_fn;
 };
@@ -113,8 +126,8 @@ drv_app_result
 drv_app_ctx_process(
         struct drv_app_ctx *ctx,
         uint64_t *out_events);
-        
-        
+
+
 /* ----------------------------------------------------------------- Input -- */
 
 
@@ -128,7 +141,7 @@ typedef enum _drv_app_button_state {
 
 typedef enum _drv_app_kb_id {
         /* dummy key */
-        
+
         DRV_APP_KB_NULL,
 
         /* alphabet */
@@ -139,14 +152,14 @@ typedef enum _drv_app_kb_id {
         DRV_APP_KB_P, DRV_APP_KB_Q, DRV_APP_KB_R, DRV_APP_KB_S, DRV_APP_KB_T,
         DRV_APP_KB_U, DRV_APP_KB_V, DRV_APP_KB_W, DRV_APP_KB_X, DRV_APP_KB_Y,
         DRV_APP_KB_Z,
-        
+
         /* numbers */
-        
+
         DRV_APP_KB_1, DRV_APP_KB_2, DRV_APP_KB_3, DRV_APP_KB_4, DRV_APP_KB_5,
         DRV_APP_KB_6, DRV_APP_KB_7, DRV_APP_KB_8, DRV_APP_KB_9, DRV_APP_KB_0,
-        
+
         /* direction keys */
-        
+
         DRV_APP_KB_UP, DRV_APP_KB_DOWN, DRV_APP_KB_LEFT, DRV_APP_KB_RIGHT,
 
         /* function keys */
@@ -154,15 +167,15 @@ typedef enum _drv_app_kb_id {
         DRV_APP_KB_F1, DRV_APP_KB_F2,  DRV_APP_KB_F3,  DRV_APP_KB_F4,
         DRV_APP_KB_F5, DRV_APP_KB_F6,  DRV_APP_KB_F7,  DRV_APP_KB_F8,
         DRV_APP_KB_F9, DRV_APP_KB_F10, DRV_APP_KB_F11, DRV_APP_KB_F12,
-        
+
         /* others */
-        
+
         DRV_APP_KB_ESC, DRV_APP_KB_SPACE,
         DRV_APP_KB_LSHIFT, DRV_APP_KB_RSHIFT,
         DRV_APP_KB_LCTRL, DRV_APP_KB_RCTRL,
-        
+
         /* count */
-        
+
         DRV_APP_KB_COUNT
 
 } drv_app_kb_id;
@@ -178,26 +191,26 @@ drv_app_result
 drv_app_input_kb_data_get(
         struct drv_app_ctx *ctx,
         uint8_t **key_data); /* Valid for lifetime of app */
-        
-        
+
+
 typedef enum _drv_app_ms_key_id {
         DRV_APP_MS_KEY_LEFT,
         DRV_APP_MS_KEY_MIDDLE,
         DRV_APP_MS_KEY_RIGHT,
-        
+
         /* count */
-        
+
         DRV_APP_MS_KEY_COUNT
 } drv_app_ms_key_id;
-        
-        
+
+
 struct drv_app_mouse_data {
         float dx;
         float dy;
-        
+
         float x;
         float y;
-        
+
         uint8_t buttons[DRV_APP_MS_KEY_COUNT];
 };
 
@@ -210,18 +223,22 @@ drv_app_input_ms_data_get(
 /* ------------------------------------------------------------------ Data -- */
 
 
+struct drv_app_data {
 #ifdef _WIN32
-struct drv_app_data {
-        void *hwnd;
-};
+        struct drv_app_data_win32 {
+                void *hwnd;
+                struct drv_app_data_dx {
+                        void *device;
+                        void *factory;
+                } dx;
+        } win32;
+#elif
+        struct drv_app_data_metal {
+                void *view;
+                void *device;
+        } metal;
 #endif
-
-#ifdef __APPLE__
-struct drv_app_data {
-        void *view;
-        void *gpu_device;
 };
-#endif
 
 
 /*
