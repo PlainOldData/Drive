@@ -91,27 +91,27 @@ drvm_stack_push(
         unsigned long free = st->mem_size;
         unsigned char *end = start;
         struct drvi_stack_marker *prev = st->top;
-        
+
         if(st->top) {
                 end = (unsigned char*)st->top->end;
                 free -= end - start;
         }
-        
+
         unsigned long needed = sizeof(struct drvi_stack_marker);
         needed += bytes;
-        
+
         if(free < needed) {
                 return 0;
         }
-        
+
         struct drvi_stack_marker *next = (struct drvi_stack_marker *)end;
         next->start = end + sizeof(*next);
-        next->end = next->start + bytes;
+        next->end = (unsigned char *)next->start + bytes;
         next->label = label;
         next->prev = prev;
-        
+
         st->top = next;
-        
+
         return next->start;
 }
 
@@ -123,12 +123,12 @@ drvm_stack_pop(
         if(!st->top) {
                 return 0;
         }
-        
+
         if(!st->top->prev) {
                 st->top = 0;
                 return 0;
         }
-        
+
         st->top = st->top->prev;
         return st->top->start;
 }
