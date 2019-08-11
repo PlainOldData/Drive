@@ -100,7 +100,7 @@ drv_app_gpu_device_create(
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
 
-        struct drv_app_gpu_metal *gpu = (struct drv_app_gpu_metal *)mem;
+        struct drv_app_gpu_metal *gpu = (struct drv_app_gpu_metal *)device_mem;
         memset(gpu, 0, sizeof(*gpu));
         gpu->header.id = DRV_APP_GPU_DEVICE_METAL;
 
@@ -356,7 +356,7 @@ drv_app_ctx_create(
         [window setContentView:ctx->metal_view];
 
         ctx->metal_layer             = (CAMetalLayer *)[ctx->metal_view layer];
-        ctx->metal_layer.device      = desc->gpu_device;
+        ctx->metal_layer.device      = ((struct drv_app_gpu_metal*)desc->gpu_device)->device;
         ctx->metal_layer.pixelFormat = ctx->metal_layer.pixelFormat;
 
         [NSApp activateIgnoringOtherApps:YES];

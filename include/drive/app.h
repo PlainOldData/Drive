@@ -51,9 +51,8 @@ typedef void(*drv_app_free_fn)(void *);
 typedef enum _drv_app_gpu_device_id {
         #ifdef _WIN32
         DRV_APP_GPU_DEVICE_DX12,
-        DRV_APP_GPU_DEVICE_VULKAN,
         #elif defined(__linux__)
-        DRV_APP_GPU_DEVICE_VULKAN,
+        
         #elif defined(__APPLE__)
         DRV_APP_GPU_DEVICE_METAL,
         #endif
@@ -232,7 +231,7 @@ struct drv_app_data {
                         void *factory;
                 } dx;
         } win32;
-#elif
+#elif defined __APPLE__
         struct drv_app_data_metal {
                 void *view;
                 void *device;

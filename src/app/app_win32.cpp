@@ -39,6 +39,10 @@
 #endif
 
 
+#define DX_DEBUG 1
+#define DX_LOG(FMT, ...) { char tmp[256]; sprintf(tmp, "DX_LOG: " FMT "\n", __VA_ARGS__); OutputDebugStringA(tmp); }
+
+
 /* -------------------------------------------------------------- Lifetime -- */
 
 struct drv_app_gpu_dx;
@@ -510,9 +514,6 @@ drv_app_ctx_process(
 
 /* ------------------------------------------------------------------- App -- */
 
-#define DX_DEBUG 1
-
-#define DX_LOG(FMT, ...) { char tmp[256]; sprintf(tmp, "DX_LOG: " FMT "\n", __VA_ARGS__); OutputDebugStringA(tmp); }
 
 struct drv_app_gpu_dx {
         struct drv_app_gpu_device header;
@@ -692,8 +693,7 @@ drv_app_gpu_device_destroy(
 }
 
 
-#undef DX_LOG
-#undef DX_DEBUG
+
 
 /* ----------------------------------------------------------------- Input -- */
 
@@ -738,6 +738,13 @@ drv_app_input_ms_data_get(
 
         return DRV_APP_RESULT_FAIL;
 }
+
+
+/* ---------------------------------------------------------------- Config -- */
+
+
+#undef DX_LOG
+#undef DX_DEBUG
 
 
 #endif
