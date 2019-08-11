@@ -679,8 +679,8 @@ drv_mem_tagged_allocator_create(
         if(desc->alloc_type == DRV_MEM_ALLOC_TYPE_PHYSICAL) {
 
                 /* find a free allocator */
-                int i;
-                uint32_t idx;
+                unsigned i;
+                uint32_t idx = 0;
 
                 struct drv_tag_alloc *alloc = 0;
                 
@@ -781,16 +781,16 @@ drv_mem_tagged_alloc(
                 /* search for a free space */
                 struct drv_tag_alloc *alloc = &ctx->alloc_tagged[idx];
                 
-                int i;
+                size_t i;
                 void *addr = 0;
 
                 for(i = 0; i < alloc->chunk_count; ++i) {
                         uint64_t id = alloc->alloc_ids[i];
                         if(id == 0) {
-                                unsigned chunk_start = alloc->chunk_bytes * i;
+                                size_t chunk_start = alloc->chunk_bytes * i;
                                 addr = &alloc->start[chunk_start];
 
-                                alloc->alloc_ids[i] = alloc_id;
+                                alloc->alloc_ids[i] = tag_id;
 
                                 break;
                         }
@@ -803,10 +803,6 @@ drv_mem_tagged_alloc(
                 }
 
                 return DRV_MEM_RESULT_OK;
-        }
-        else {
-                /* vtagged not supported yet */
-                return DRV_MEM_RESULT_FAIL;
         }
 
         return DRV_MEM_RESULT_FAIL;
@@ -847,13 +843,13 @@ drv_mem_tagged_free(
                 /* clear tag */
                 struct drv_tag_alloc *alloc = &ctx->alloc_tagged[idx];
                 
-                int i;
+                size_t i;
                 void *addr = 0;
 
                 for(i = 0; i < alloc->chunk_count; ++i) {
                         uint64_t id = alloc->alloc_ids[i];
-                        if(id == alloc_id) {
-                                unsigned chunk_start = alloc->chunk_bytes * i;
+                        if(id == tag_id) {
+                                size_t chunk_start = alloc->chunk_bytes * i;
                                 addr = &alloc->start[chunk_start];
 
                                 alloc->alloc_ids[i] = 0;
@@ -861,10 +857,6 @@ drv_mem_tagged_free(
                 }
 
                 return DRV_MEM_RESULT_OK;
-        }
-        else {
-                /* vtagged not supported yet */
-                return DRV_MEM_RESULT_FAIL;
         }
 
         return DRV_MEM_RESULT_FAIL;

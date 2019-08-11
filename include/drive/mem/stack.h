@@ -139,7 +139,10 @@ drvm_stack_pop_till(
         struct drv_mem_stack *st,
         void *target)
 {
+        (void)st;
+        (void)target;
 
+        return 0;
 }
 
 
@@ -147,7 +150,9 @@ void*
 drvm_stack_clear(
         struct drv_mem_stack *st)
 {
+        (void)st;
 
+        return 0;
 }
 
 

@@ -233,6 +233,8 @@ drv_bench_convert_to_trace(
         #ifdef _WIN32
         SymSetOptions(SymGetOptions() | SYMOPT_UNDNAME);
         BOOL initd = SymInitialize(GetCurrentProcess(),NULL,TRUE);
+        assert(initd == TRUE);
+
         int pid = (int)GetCurrentProcessId();
         #endif
         
@@ -248,7 +250,7 @@ drv_bench_convert_to_trace(
         uint64_t i;
 
         for(i = 0; i < count; ++i) {
-                int j = (start + i) % count;
+                uint64_t j = (start + i) % count;
 
                 struct drv_bench_info *st_evt = &ctx->info[j];
                 struct drv_bench_info *ed_evt = 0;
@@ -303,7 +305,7 @@ drv_bench_convert_to_trace(
         }
 
         /* erase last comma */
-        fseek(f, -(strlen(",\n") + 1), SEEK_CUR);
+        fseek(f, -(long)(strlen(",\n") + 1), SEEK_CUR);
 
         fprintf(f, "\n\t],\n");
         fprintf(f, "\t\"displayTimeUnit\": \"ns\"\n}\n");

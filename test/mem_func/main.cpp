@@ -24,8 +24,8 @@ tagged_phy_test()
                 return 0;
         }
        
-        uint64_t count = 32;
-        size_t chunk_size = 2097152;
+        unsigned int count = 32;
+        unsigned int chunk_size = 2097152;
 
         drv_mem_tagged_allocator_desc alloc_desc = {};
         alloc_desc.alloc_type = DRV_MEM_ALLOC_TYPE_PHYSICAL;

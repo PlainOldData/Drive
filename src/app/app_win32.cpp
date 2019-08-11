@@ -101,7 +101,6 @@ internal_wnd_proc(HWND hWnd, UINT u_msg, WPARAM w_param, LPARAM l_param)
                 break;
         }
         case WM_SIZING: {
-                int i = 0;
                 break;
         }
         case WM_SIZE: {
@@ -169,7 +168,6 @@ internal_wnd_proc(HWND hWnd, UINT u_msg, WPARAM w_param, LPARAM l_param)
                 break;
         }
         case WM_MOVING: {
-                int i = 0;
                 break;
         }
 
@@ -485,6 +483,10 @@ drv_app_ctx_process(
 
         while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
                 switch (msg.message) {
+                case WM_DROPFILES: {
+                        /* if no case statment a warning is produced */
+                        (void)0;
+                }
                 /*
                 case WM_DROPFILES: {
                         internal_wm_drop_files(
