@@ -51,6 +51,7 @@ typedef enum _drv_mem_alloc_type {
 #define DRV_MEM_END(size, ptr) (void*)((unsigned char*)ptr + size);
 #define DRV_MEM_INBOUNDS(curr, end) ((unsigned char*)curr < (unsigned char*)end)
 #define DRV_MEM_IS_A16(ptr)((unsigned long)ptr&0xF == 0))
+#define DRV_MEM_SIZE(start, end) ((unsigned char*)end - (unsigned char*)start)
 
 
 /* -------------------------------------------------------------- Lifetime -- */
