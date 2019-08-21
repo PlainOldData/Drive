@@ -58,7 +58,7 @@ typedef enum _drv_app_gpu_device_id {
 
 struct drv_app_gpu_device {
         uint32_t id;
-        uint32_t unused;
+        uint32_t pad;
         uint8_t api_data[64];
 };
 
@@ -69,7 +69,7 @@ struct drv_app_gpu_device {
  */
 drv_app_result
 drv_app_gpu_device_create(
-        drv_app_gpu_device_id device,
+        drv_app_gpu_device_id id,
         struct drv_app_gpu_device *out_device);
 
 
