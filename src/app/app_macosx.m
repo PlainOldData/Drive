@@ -79,34 +79,29 @@
 /* -------------------------------------------------------------- Lifetime -- */
 
 
-struct drv_app_gpu_metal {
-        struct drv_app_gpu_device header;
-
+struct drv_app_metal {
         id<MTLDevice> device;
 };
 
 
 drv_app_result
 drv_app_gpu_device_create(
-        drv_app_gpu_device_id device,
-        uint8_t *device_mem,
-        struct drv_app_gpu_device **out_device)
+        drv_app_gpu_device_id id,
+        struct drv_app_gpu_device *out_device)
 {
-        if(device != DRV_APP_GPU_DEVICE_METAL || !device_mem) {
+        if(id != DRV_APP_GPU_DEVICE_METAL) {
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
 
-        if(DRV_APP_GPU_DEVICE_SIZE < sizeof(struct drv_app_gpu_metal)) {
-                return DRV_APP_RESULT_BAD_PARAMS;
-        }
-
-        struct drv_app_gpu_metal *gpu = (struct drv_app_gpu_metal *)device_mem;
+        struct drv_app_gpu_device *gpu = out_device;
         memset(gpu, 0, sizeof(*gpu));
-        gpu->header.id = DRV_APP_GPU_DEVICE_METAL;
+        gpu->id = id;
 
-        gpu->device = MTLCreateSystemDefaultDevice();
+        struct drv_app_metal *mtl = (struct drv_app_metal *)gpu->api_data;
+        assert(sizeof(*mtl) <= sizeof(gpu->api_data));
 
-        *out_device = (struct drv_app_gpu_device *)gpu;
+        mtl->device = MTLCreateSystemDefaultDevice();
+
         return DRV_APP_RESULT_OK;
 }
 
@@ -127,7 +122,7 @@ struct drv_app_ctx {
         macos_window_delegate *window_delegate;
         CAMetalLayer * metal_layer;
         macos_metal_view * metal_view;
-        struct drv_app_gpu_metal *gpu_device;
+        struct drv_app_gpu_device *gpu_device;
         drv_app_free_fn free_fn;
 
         uint64_t events;
@@ -269,7 +264,7 @@ drv_app_ctx_create(
         struct drv_app_ctx *ctx = desc->alloc_fn(sizeof(*ctx));
         memset(ctx, 0, sizeof(*ctx));
 
-        ctx->gpu_device = (struct drv_app_gpu_metal *)desc->gpu_device;
+        ctx->gpu_device = desc->gpu_device;
         ctx->width      = desc->width;
         ctx->height     = desc->height;
         ctx->free_fn    = desc->free_fn;
@@ -355,8 +350,10 @@ drv_app_ctx_create(
 
         [window setContentView:ctx->metal_view];
 
+        struct drv_app_metal *mtl = (struct drv_app_metal *)desc->gpu_device->api_data;
+
         ctx->metal_layer             = (CAMetalLayer *)[ctx->metal_view layer];
-        ctx->metal_layer.device      = ((struct drv_app_gpu_metal*)desc->gpu_device)->device;
+        ctx->metal_layer.device      = mtl->device;
         ctx->metal_layer.pixelFormat = ctx->metal_layer.pixelFormat;
 
         [NSApp activateIgnoringOtherApps:YES];
@@ -543,9 +540,9 @@ drv_app_ctx_process(
 
 
 drv_app_result
-drv_app_data_get(
+drv_app_data_get_macos(
         struct drv_app_ctx *ctx,
-        struct drv_app_data *data)
+        struct drv_app_data_macos *data)
 {
         if(DRV_APP_PCHECK && !ctx) {
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
@@ -557,9 +554,11 @@ drv_app_data_get(
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
 
+        struct drv_app_metal *mtl = (struct drv_app_metal *)ctx->gpu_device->api_data;
+
         memset(data, 0, sizeof(*data));
-        data->metal.view = (void*)ctx->metal_layer;
-        data->metal.device = ctx->gpu_device->device;
+        data->metal_view = (void*)ctx->metal_layer;
+        data->metal_device = mtl->device;
 
         return DRV_APP_RESULT_OK;
 }

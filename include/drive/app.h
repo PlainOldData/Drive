@@ -45,14 +45,11 @@ typedef void(*drv_app_free_fn)(void *);
 /* -------------------------------------------------------------- Lifetime -- */
 
 
-#define DRV_APP_GPU_DEVICE_SIZE 64
-
-
 typedef enum _drv_app_gpu_device_id {
         #ifdef _WIN32
         DRV_APP_GPU_DEVICE_DX12,
         #elif defined(__linux__)
-        
+
         #elif defined(__APPLE__)
         DRV_APP_GPU_DEVICE_METAL,
         #endif
@@ -60,7 +57,9 @@ typedef enum _drv_app_gpu_device_id {
 
 
 struct drv_app_gpu_device {
-        drv_app_gpu_device_id id;
+        uint32_t id;
+        uint32_t unused;
+        uint8_t api_data[64];
 };
 
 /*
@@ -71,8 +70,7 @@ struct drv_app_gpu_device {
 drv_app_result
 drv_app_gpu_device_create(
         drv_app_gpu_device_id device,
-        uint8_t *mem,
-        struct drv_app_gpu_device **out_device);
+        struct drv_app_gpu_device *out_device);
 
 
 drv_app_result
@@ -221,22 +219,13 @@ drv_app_input_ms_data_get(
 
 /* ------------------------------------------------------------------ Data -- */
 
+#if _WIN32
 
-struct drv_app_data {
-#ifdef _WIN32
-        struct drv_app_data_win32 {
-                void *hwnd;
-                struct drv_app_data_dx {
-                        void *device;
-                        void *factory;
-                } dx;
-        } win32;
-#elif defined __APPLE__
-        struct drv_app_data_metal {
-                void *view;
-                void *device;
-        } metal;
-#endif
+
+struct drv_app_data_win32 {
+        void *hwnd;
+        void *dx_device;
+        void *dx_factory;
 };
 
 
@@ -247,9 +236,26 @@ struct drv_app_data {
  * returns DRV_APP_RESULT_OK on success.
  */
 drv_app_result
-drv_app_data_get(
+drv_app_data_get_win32(
         struct drv_app_ctx *ctx,
-        struct drv_app_data *data);
+        struct drv_app_data_win32 *data);
+
+
+#else if __APPLE__
+
+
+struct drv_app_data_macos {
+        void *metal_view;
+        void *metal_device;
+};
+
+
+drv_app_result
+drv_app_data_get_macos(
+        struct drv_app_ctx *ctx,
+        struct drv_app_data_macos *data);
+
+#endif
 
 
 #ifdef __cplusplus
