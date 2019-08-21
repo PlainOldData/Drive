@@ -221,11 +221,10 @@ drv_app_input_ms_data_get(
 
 #if _WIN32
 
-
 struct drv_app_data_win32 {
         void *hwnd;
-        void *dx_device;
-        void *dx_factory;
+        struct ID3D12Device *dx_device;
+        struct IDXGIFactory4 *dx_factory;
 };
 
 
