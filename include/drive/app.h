@@ -16,7 +16,9 @@ extern "C" {
 #endif
 
 
-struct drv_app_ctx; /* opaque */
+struct drv_app_ctx {
+        unsigned char opaque_buffer[1 << 12];
+};
 
 
 /* ----------------------------------------------------------- Identifiers -- */
@@ -57,8 +59,6 @@ typedef enum _drv_app_gpu_device_id {
 
 
 struct drv_app_gpu_device {
-        uint32_t id;
-        uint32_t pad;
         uint8_t api_data[64];
 };
 
@@ -83,8 +83,6 @@ struct drv_app_ctx_create_desc {
         int height;
         const char *title;
         struct drv_app_gpu_device *gpu_device;
-        drv_app_alloc_fn alloc_fn;
-        drv_app_free_fn free_fn;
 };
 
 
@@ -92,25 +90,23 @@ struct drv_app_ctx_create_desc {
  * returns DRV_APP_RESULT_BAD_PARAMS if desc is null.
  * returns DRV_APP_RESULT_BAD_PARAMS if out_ctx is null.
  * returns DRV_APP_RESULT_INVALID_DESC if desc.gpu_device is null.
- * returns DRV_APP_RESULT_INVALID_DESC if desc.alloc_fn is null.
  * returns DRV_APP_RESULT_FAIL on internal failures.
  * returns DRV_APP_RESULT_OK on success.
  */
 drv_app_result
 drv_app_ctx_create(
         const struct drv_app_ctx_create_desc *desc,
-        struct drv_app_ctx **out_ctx);
+        struct drv_app_ctx *out_ctx);
 
 
 /*
  * returns DRV_APP_RESULT_BAD_PARAMS if destroy is null.
- * returns DRV_APP_RESULT_BAD_PARAMS if *destroy is null.
  * returns DRV_APP_RESULT_FAIL on internal failures.
  * returns DRV_APP_RESULT_OK on success.
  */
 drv_app_result
 drv_app_ctx_destroy(
-        struct drv_app_ctx **destroy);
+        struct drv_app_ctx *destroy);
 
 
 /*
@@ -219,7 +215,7 @@ drv_app_input_ms_data_get(
 
 /* ------------------------------------------------------------------ Data -- */
 
-#if _WIN32
+#if defined(_WIN32)
 
 struct drv_app_data_win32 {
         void *hwnd;
@@ -240,7 +236,7 @@ drv_app_data_get_win32(
         struct drv_app_data_win32 *data);
 
 
-#else if __APPLE__
+#elif defined(__APPLE__)
 
 
 struct drv_app_data_macos {

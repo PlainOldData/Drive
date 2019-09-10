@@ -50,12 +50,17 @@ test_device() {
 int
 test_setup(struct drv_app_ctx *ctx)
 {
-        struct drv_app_data data = {0, 0};
-        drv_app_result app_ok = drv_app_data_get(ctx, &data);
+        drv_app_result app_ok = DRV_APP_RESULT_OK;
+        
+        #ifdef __APPLE__
+        struct drv_app_data_macos data = {0, 0};
+        app_ok = drv_app_data_get_macos(ctx, &data);
+        #endif
+        
         assert(app_ok == DRV_APP_RESULT_OK);
         
-        metal_device = id<MTLDevice>(data.gpu_device);
-        metal_layer= (CAMetalLayer*)data.layer;
+        metal_device = id<MTLDevice>(data.metal_device);
+        metal_layer= (CAMetalLayer*)data.metal_view;
         
         cmd_queue = [metal_device newCommandQueue];
     

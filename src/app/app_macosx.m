@@ -72,7 +72,7 @@
 @end
 
 @interface macos_metal_view : NSView {}
-@property (nonatomic) struct drv_app_ctx *drv_ctx;
+@property (nonatomic) struct drv_app_ctx_i *drv_ctx;
 @end
 
 
@@ -95,7 +95,6 @@ drv_app_gpu_device_create(
 
         struct drv_app_gpu_device *gpu = out_device;
         memset(gpu, 0, sizeof(*gpu));
-        gpu->id = id;
 
         struct drv_app_metal *mtl = (struct drv_app_metal *)gpu->api_data;
         assert(sizeof(*mtl) <= sizeof(gpu->api_data));
@@ -110,15 +109,12 @@ drv_app_result
 drv_app_gpu_device_destroy(
         struct drv_app_gpu_device *device)
 {
-        if(device->id != DRV_APP_GPU_DEVICE_METAL) {
-                return DRV_APP_RESULT_BAD_PARAMS;
-        }
-
         return DRV_APP_RESULT_OK;
 }
 
 
-struct drv_app_ctx {
+/* internal ctx */
+struct drv_app_ctx_i {
         macos_window_delegate *window_delegate;
         CAMetalLayer * metal_layer;
         macos_metal_view * metal_view;
@@ -238,7 +234,7 @@ struct drv_app_ctx {
 drv_app_result
 drv_app_ctx_create(
         const struct drv_app_ctx_create_desc *desc,
-        struct drv_app_ctx **out_ctx)
+        struct drv_app_ctx *out_ctx)
 {
         /* param checks */
         if(DRV_APP_PCHECK && !desc) {
@@ -251,23 +247,30 @@ drv_app_ctx_create(
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
 
-        if(DRV_APP_PCHECK && !desc->alloc_fn) {
-                assert(!"DRV_APP_RESULT_INVALID_DESC");
-                return DRV_APP_RESULT_INVALID_DESC;
-        }
-
         if(DRV_APP_PCHECK && !desc->gpu_device) {
                 assert(!"DRV_APP_RESULT_INVALID_DESC");
                 return DRV_APP_RESULT_INVALID_DESC;
         }
+        
+        if(DRV_APP_PCHECK) {
+                unsigned long si_ctx = sizeof(*out_ctx);
+                unsigned long si_ctxi = sizeof(struct drv_app_ctx_i);
+                
+                if(si_ctxi >= si_ctx) {
+                        /* resize opaque buffer */
+                        assert(!"DRV_APP_RESULT_FAIL");
+                        return DRV_APP_RESULT_FAIL;
+                }
+        }
 
-        struct drv_app_ctx *ctx = desc->alloc_fn(sizeof(*ctx));
+        unsigned char *op_buf = &out_ctx->opaque_buffer[0];
+        struct drv_app_ctx_i *ctx = (struct drv_app_ctx_i*)op_buf;
+        
         memset(ctx, 0, sizeof(*ctx));
 
         ctx->gpu_device = desc->gpu_device;
         ctx->width      = desc->width;
         ctx->height     = desc->height;
-        ctx->free_fn    = desc->free_fn;
 
         /* app */
         ctx->app_pool = [[NSAutoreleasePool alloc] init];
@@ -434,35 +437,23 @@ drv_app_ctx_create(
                 ctx->ms_state.buttons[i] = DRV_APP_BUTTON_STATE_UP;
         }
 
-        *out_ctx = ctx;
-
         return DRV_APP_RESULT_OK;
 }
 
 
 drv_app_result
 drv_app_ctx_destroy(
-        struct drv_app_ctx **destroy)
+        struct drv_app_ctx *destroy)
 {
         if(DRV_APP_PCHECK && !destroy) {
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
 
-        if(DRV_APP_PCHECK && !(*destroy)) {
-                assert(!"DRV_APP_RESULT_BAD_PARAMS");
-                return DRV_APP_RESULT_BAD_PARAMS;
-        }
-
-        struct drv_app_ctx *ctx = *destroy;
+        unsigned char *op_buf = (void*)&destroy->opaque_buffer[0];
+        struct drv_app_ctx_i *ctx = (struct drv_app_ctx_i*)op_buf;
 
         [ctx->app_pool drain];
-
-        if(ctx->free_fn) {
-                ctx->free_fn(ctx);
-        }
-
-        *destroy = 0;
 
         return DRV_APP_RESULT_OK;
 }
@@ -484,13 +475,16 @@ process_next_evt(NSDate *date)
 
 drv_app_result
 drv_app_ctx_process(
-        struct drv_app_ctx *ctx,
+        struct drv_app_ctx *ctx_buf,
         uint64_t *out_events)
 {
-        if(DRV_APP_PCHECK && !ctx) {
+        if(DRV_APP_PCHECK && !ctx_buf) {
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
+        
+        unsigned char *op_buf = &ctx_buf->opaque_buffer[0];
+        struct drv_app_ctx_i *ctx = (struct drv_app_ctx_i*)op_buf;
 
         /* remove key events */
         int i;
@@ -541,10 +535,10 @@ drv_app_ctx_process(
 
 drv_app_result
 drv_app_data_get_macos(
-        struct drv_app_ctx *ctx,
+        struct drv_app_ctx *ctx_buf,
         struct drv_app_data_macos *data)
 {
-        if(DRV_APP_PCHECK && !ctx) {
+        if(DRV_APP_PCHECK && !ctx_buf) {
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
@@ -553,6 +547,9 @@ drv_app_data_get_macos(
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
+        
+        unsigned char *op_buf = &ctx_buf->opaque_buffer[0];
+        struct drv_app_ctx_i *ctx = (struct drv_app_ctx_i*)op_buf;
 
         struct drv_app_metal *mtl = (struct drv_app_metal *)ctx->gpu_device->api_data;
 
@@ -569,10 +566,10 @@ drv_app_data_get_macos(
 
 drv_app_result
 drv_app_input_kb_data_get(
-        struct drv_app_ctx *ctx,
+        struct drv_app_ctx *ctx_buf,
         uint8_t **key_data)
 {
-        if(DRV_APP_PCHECK && !ctx) {
+        if(DRV_APP_PCHECK && !ctx_buf) {
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
@@ -581,6 +578,9 @@ drv_app_input_kb_data_get(
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
+        
+        unsigned char *op_buf = &ctx_buf->opaque_buffer[0];
+        struct drv_app_ctx_i *ctx = (struct drv_app_ctx_i*)op_buf;
 
         *key_data = ctx->key_state;
 
@@ -590,10 +590,10 @@ drv_app_input_kb_data_get(
 
 drv_app_result
 drv_app_input_ms_data_get(
-        struct drv_app_ctx *ctx,
+        struct drv_app_ctx *ctx_buf,
         struct drv_app_mouse_data **ms_data)
 {
-        if(DRV_APP_PCHECK && !ctx) {
+        if(DRV_APP_PCHECK && !ctx_buf) {
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
@@ -602,6 +602,9 @@ drv_app_input_ms_data_get(
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
+        
+        unsigned char *op_buf = &ctx_buf->opaque_buffer[0];
+        struct drv_app_ctx_i *ctx = (struct drv_app_ctx_i*)op_buf;
 
         *ms_data = &ctx->ms_state;
 
