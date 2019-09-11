@@ -24,7 +24,7 @@ struct drv_app_ctx {
 /* ----------------------------------------------------------- Identifiers -- */
 
 
-typedef enum _drv_app_result {
+typedef enum drv_app_result_ {
         DRV_APP_RESULT_OK,
         DRV_APP_RESULT_BAD_PARAMS,
         DRV_APP_RESULT_INVALID_DESC,
@@ -32,7 +32,7 @@ typedef enum _drv_app_result {
 } drv_app_result;
 
 
-typedef enum _drv_plat_event {
+typedef enum drv_plat_event_ {
         DRV_APP_EVENT_SURFACE_MOVED = 1 << 0,
         DRV_APP_EVENT_SURFACE_CLOSED = 1 << 1,
         DRV_APP_EVENT_INPUT = 1 << 2,
@@ -43,7 +43,7 @@ typedef enum _drv_plat_event {
 /* -------------------------------------------------------------- Lifetime -- */
 
 
-typedef enum _drv_app_gpu_device_id {
+typedef enum drv_app_gpu_device_id_ {
         #ifdef _WIN32
         DRV_APP_GPU_DEVICE_DX12,
         #elif defined(__linux__)
@@ -55,7 +55,7 @@ typedef enum _drv_app_gpu_device_id {
 
 
 struct drv_app_gpu_device {
-        uint8_t api_data[64];
+        uint8_t opaque_buffer[1 << 6];
 };
 
 /*
@@ -125,7 +125,7 @@ drv_app_ctx_process(
 /* ----------------------------------------------------------------- Input -- */
 
 
-typedef enum _drv_app_button_state {
+typedef enum drv_app_button_state_ {
         DRV_APP_BUTTON_STATE_UP         = 1 << 0,
         DRV_APP_BUTTON_STATE_UP_EVENT   = 1 << 1,
         DRV_APP_BUTTON_STATE_DOWN       = 1 << 2,
@@ -133,7 +133,7 @@ typedef enum _drv_app_button_state {
 } drv_app_button_state;
 
 
-typedef enum _drv_app_kb_id {
+typedef enum drv_app_kb_id_ {
         /* dummy key */
 
         DRV_APP_KB_NULL,

@@ -48,7 +48,6 @@
 
 /* -------------------------------------------------------------- Lifetime -- */
 
-struct drv_app_gpu_dx;
 
 struct drv_app_ctx_i {
         HWND hwnd;
@@ -552,7 +551,7 @@ drv_app_data_get_win32(
         struct drv_app_gpu_device *gpu = ctx->gpu;
         if(gpu)
         {
-                struct drv_app_dx *dx = (struct drv_app_dx *)gpu->api_data;
+                struct drv_app_dx *dx = (struct drv_app_dx *)gpu->opaque_buffer;
                 data->dx_device = dx->device;
                 data->dx_factory = dx->factory;
         }
@@ -605,8 +604,8 @@ drv_app_gpu_device_create(
 
         struct drv_app_gpu_device gpu = {};
         
-        struct drv_app_dx *dx = (struct drv_app_dx *)gpu.api_data;
-        static_assert(sizeof(*dx) <= sizeof(gpu.api_data), "buffer too small");
+        struct drv_app_dx *dx = (struct drv_app_dx *)gpu.opaque_buffer;
+        static_assert(sizeof(*dx) <= sizeof(gpu.opaque_buffer), "buffer too small");
 
         HRESULT ok = S_OK;
 
@@ -725,11 +724,11 @@ drv_app_result
 drv_app_gpu_device_destroy(
         struct drv_app_gpu_device *device)
 {
-        struct drv_app_dx *dx = (struct drv_app_dx *)device->api_data;
+        struct drv_app_dx *dx = (struct drv_app_dx *)device->opaque_buffer;
 
         /* param checks */
 
-        if(DRV_APP_PCHECKS && dx) {
+        if(DRV_APP_PCHECKS && !dx) {
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
