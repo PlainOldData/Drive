@@ -432,11 +432,7 @@ drv_app_ctx_destroy(
         }
 
         drv_app_ctx_i *ctx = (drv_app_ctx_i*)destroy->opaque_buffer;
-
-        if(DRV_APP_PCHECKS && !ctx->hwnd) {
-                assert(!"DRV_APP_RESULT_BAD_PARAMS");
-                return DRV_APP_RESULT_BAD_PARAMS;
-        }
+        (void)ctx;
 
         return DRV_APP_RESULT_OK;
 }
