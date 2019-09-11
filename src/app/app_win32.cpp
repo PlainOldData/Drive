@@ -612,77 +612,108 @@ drv_app_gpu_device_create(
 
         if(DX_DEBUG) {
                 ok = D3D12GetDebugInterface(IID_PPV_ARGS(&dx->debug));
-                if(ok >= 0 && dx->debug)
-                {
+                if(ok >= 0 && dx->debug) {
                         dx->debug->EnableDebugLayer();
                 }
         }
 
-        ok = CreateDXGIFactory2(DX_DEBUG ? DXGI_CREATE_FACTORY_DEBUG : 0, IID_PPV_ARGS(&dx->factory));
-        DRV_APP_ASSERT(ok >= 0 && dx->factory);
+        UINT flags = DX_DEBUG ? DXGI_CREATE_FACTORY_DEBUG : 0;
+        ok = CreateDXGIFactory2(flags, IID_PPV_ARGS(&dx->factory));
 
-        {
-                UINT adapter_count = 0;
-                IDXGIAdapter1 *adapters[8];
-                for(UINT i = 0; i < DRV_ARRAY_COUNT(adapters); ++i)
-                {
-                        IDXGIAdapter1 *it = 0;
-                        ok = dx->factory->EnumAdapters1(i, &it);
-                        if(ok == S_OK)
-                        {
-                                adapters[adapter_count++] = it;
-                        }
-                        else
-                        {
-                                break;
-                        }
+        if(ok != S_OK || !dx->factory) {
+                DRV_APP_ASSERT(!"DRV_APP_RESULT_FAIL");
+                return DRV_APP_RESULT_FAIL;
+        }
+
+        /* adapters */
+        
+        UINT adapter_count = 0;
+        IDXGIAdapter1 *adapters[8] = {};
+
+        for(UINT i = 0; i < DRV_ARRAY_COUNT(adapters); ++i) {
+                IDXGIAdapter1 *it = 0;
+                ok = dx->factory->EnumAdapters1(i, &it);
+
+                if(ok == S_OK) {
+                        adapters[adapter_count++] = it;
                 }
-
-                IDXGIAdapter1 *adapter1 = 0;
-                SIZE_T adapter_mem = 0;
-                for(UINT i = 0; i < adapter_count; ++i) {
-                        DXGI_ADAPTER_DESC1 adapter_desc;
-                        adapters[i]->GetDesc1(&adapter_desc);
-
-                        //NOTE(Albert): DX12 only requires at least DX11 features which is why D3D_FEATURE_LEVEL_12_0 is not passed here!
-                        ok = D3D12CreateDevice(adapters[i], D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), 0);
-                        UINT dx12_supported = ok >= 0;
-
-                        if(!(adapter_desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) && dx12_supported)
-                        {
-                                if(adapter_desc.DedicatedVideoMemory > adapter_mem || !adapter1)
-                                {
-                                        adapter1 = adapters[i];
-                                        adapter_mem = adapter_desc.DedicatedVideoMemory;
-                                }
-                        }
-                }
-                DRV_APP_ASSERT(adapter1);
-
-                ok = adapter1->QueryInterface(IID_PPV_ARGS(&dx->adapter));
-                DRV_APP_ASSERT(ok >= 0 && dx->adapter);
-
-                for(UINT i = 0; i < adapter_count; ++i) {
-                        adapters[i]->Release(); adapters[i] = 0;
+                else {
+                        break;
                 }
         }
 
+        IDXGIAdapter1 *adapter1 = 0;
+        SIZE_T adapter_mem = 0;
+        for(UINT i = 0; i < adapter_count; ++i) {
+                // DX12 only requires at least DX11 features which is why D3D_FEATURE_LEVEL_12_0 is not passed here!
+                ok = D3D12CreateDevice(
+                        adapters[i],
+                        D3D_FEATURE_LEVEL_11_0,
+                        __uuidof(ID3D12Device),
+                        0);
+
+                UINT dx12_supported = ok >= 0;
+
+                if (!dx12_supported) {
+                        continue;
+                }
+
+                DXGI_ADAPTER_DESC1 adapter_desc;
+                adapters[i]->GetDesc1(&adapter_desc);
+
+                if(adapter_desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) {
+                        continue;
+                }
+
+                if(adapter_desc.DedicatedVideoMemory > adapter_mem) {
+                        adapter1 = adapters[i];
+                        adapter_mem = adapter_desc.DedicatedVideoMemory;
+                        
+                        break;
+                }
+        }
+
+        if (!adapter1) {
+                DRV_APP_ASSERT(!"DRV_APP_RESULT_FAIL");
+                return DRV_APP_RESULT_FAIL;
+        }
+        
+        ok = adapter1->QueryInterface(IID_PPV_ARGS(&dx->adapter));
+
+        if (ok != S_OK || !dx->adapter) {
+                DRV_APP_ASSERT(!"DRV_APP_RESULT_FAIL");
+                return DRV_APP_RESULT_FAIL;
+        }
+
+        for(UINT i = 0; i < adapter_count; ++i) {
+                adapters[i]->Release();
+                adapters[i] = 0;
+        }
+        
         DRV_APP_ASSERT(dx->adapter);
         dx_print_adapter_info(dx->adapter);
 
-        ok = D3D12CreateDevice(dx->adapter, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&dx->device));
-        DRV_APP_ASSERT(ok >= 0 && dx->device);
+        ok = D3D12CreateDevice(
+                dx->adapter,
+                D3D_FEATURE_LEVEL_11_0,
+                IID_PPV_ARGS(&dx->device));
 
-        if(DX_DEBUG)
-        {
-                ID3D12InfoQueue *info_queue = 0;
-                ok = dx->device->QueryInterface(IID_PPV_ARGS(&info_queue));
-                if(ok >= 0 && info_queue) {
-                        info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, TRUE);
-                        info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, TRUE);
-                        info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, TRUE);
+        if (ok != S_OK || !dx->device) {
+                DRV_APP_ASSERT(!"DRV_APP_RESULT_FAIL");
+                return DRV_APP_RESULT_FAIL;
+        }
 
-                        info_queue->Release(); info_queue = 0;
+        if(DX_DEBUG) {
+                ID3D12InfoQueue *iq = 0;
+                ok = dx->device->QueryInterface(IID_PPV_ARGS(&iq));
+
+                if(ok >= 0 && iq) {
+                        iq->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, TRUE);
+                        iq->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, TRUE);
+                        iq->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, TRUE);
+
+                        iq->Release();
+                        iq = 0;
                 }
         }
 
