@@ -40,10 +40,6 @@ typedef enum _drv_plat_event {
 } drv_plat_event;
 
 
-typedef void*(*drv_app_alloc_fn)(size_t);
-typedef void(*drv_app_free_fn)(void *);
-
-
 /* -------------------------------------------------------------- Lifetime -- */
 
 
@@ -63,8 +59,8 @@ struct drv_app_gpu_device {
 };
 
 /*
- * returns DRV_APP_RESULT_BAD_PARAMS if ctx is null,
- * returns DRV_APP_RESULT_BAD_PARAMS if device is not recognized.
+ * returns DRV_APP_RESULT_BAD_PARAMS if device id is not supported.
+ * returns DRV_APP_RESULT_FAIL on internal failures.
  * returns DRV_APP_RESULT_OK on success.
  */
 drv_app_result
@@ -73,6 +69,11 @@ drv_app_gpu_device_create(
         struct drv_app_gpu_device *out_device);
 
 
+/*
+ * returns DRV_APP_RESULT_BAD_PARAMS if device is not valid.
+ * returns DRV_APP_RESULT_FAIL on internal failures.
+ * returns DRV_APP_RESULT_OK on success.
+ */
 drv_app_result
 drv_app_gpu_device_destroy(
         struct drv_app_gpu_device *device);
@@ -100,7 +101,7 @@ drv_app_ctx_create(
 
 
 /*
- * returns DRV_APP_RESULT_BAD_PARAMS if destroy is null.
+ * returns DRV_APP_RESULT_BAD_PARAMS if destroy is null, or invalid.
  * returns DRV_APP_RESULT_FAIL on internal failures.
  * returns DRV_APP_RESULT_OK on success.
  */
@@ -110,7 +111,7 @@ drv_app_ctx_destroy(
 
 
 /*
- * returns DRV_APP_RESULT_BAD_PARAMS if ctx is null.
+ * returns DRV_APP_RESULT_BAD_PARAMS if ctx is null, or invalid.
  * returns DRV_APP_RESULT_FAIL on internal failures.
  * returns DRV_APP_RESULT_FAIL if ctx is no longer valid.
  * returns DRV_APP_RESULT_OK on success.
@@ -175,7 +176,7 @@ typedef enum _drv_app_kb_id {
 
 
 /*
- * returns DRV_APP_RESULT_BAD_PARAMS if ctx is null.
+ * returns DRV_APP_RESULT_BAD_PARAMS if ctx is null, or invalid.
  * returns DRV_APP_RESULT_BAD_PARAMS if key_data is null.
  * returns DRV_APP_RESULT_FAIL on internal failures.
  * returns DRV_APP_RESULT_OK on success.
@@ -225,7 +226,7 @@ struct drv_app_data_win32 {
 
 
 /*
- * returns DRV_APP_RESULT_BAD_PARAMS if ctx is null.
+ * returns DRV_APP_RESULT_BAD_PARAMS if ctx is null, or invalid.
  * returns DRV_APP_RESULT_BAD_PARAMS if data is null.
  * returns DRV_APP_RESULT_FAIL on internal failures.
  * returns DRV_APP_RESULT_OK on success.

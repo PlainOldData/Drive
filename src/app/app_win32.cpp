@@ -16,6 +16,7 @@
 
 #include <d3d12.h>
 #include <dxgi1_6.h>
+#include <dxgi1_3.h>
 #include <d3d12.h>
 
 
@@ -39,7 +40,9 @@
 #endif
 
 
+#ifndef DX_DEBUG
 #define DX_DEBUG 1
+#endif
 #define DX_LOG(FMT, ...) { char tmp[256]; sprintf(tmp, "DX_LOG: " FMT "\n", __VA_ARGS__); OutputDebugStringA(tmp); }
 
 
@@ -47,7 +50,7 @@
 
 struct drv_app_gpu_dx;
 
-struct drv_app_ctx {
+struct drv_app_ctx_i {
         HWND hwnd;
         HINSTANCE hinstance;
         HDC hdc;
@@ -65,7 +68,7 @@ struct drv_app_ctx {
 
 void
 internal_destroy_window(
-        struct drv_app_ctx *ctx)
+        struct drv_app_ctx_i *ctx)
 {
         /*
         * These need to be wrapped in checks, because this function can get
@@ -90,7 +93,7 @@ internal_wnd_proc(HWND hWnd, UINT u_msg, WPARAM w_param, LPARAM l_param)
 {
         LRESULT result = 0;
 
-        drv_app_ctx *ctx = (drv_app_ctx*)GetPropA(hWnd, "drive_app_ctx");
+        drv_app_ctx_i *ctx = (drv_app_ctx_i*)GetPropA(hWnd, "drive_app_ctx");
 
         switch (u_msg) {
         case WM_CLOSE:
@@ -243,11 +246,16 @@ internal_wnd_proc(HWND hWnd, UINT u_msg, WPARAM w_param, LPARAM l_param)
 drv_app_result
 drv_app_ctx_create(
         const struct drv_app_ctx_create_desc *desc,
-        struct drv_app_ctx **out)
+        struct drv_app_ctx *out)
 {
         /* param check */
 
         if(DRV_APP_PCHECKS && !desc) {
+                assert(!"DRV_APP_RESULT_BAD_PARAMS");
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
+
+        if(DRV_APP_PCHECKS && !desc->gpu_device) {
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
@@ -257,22 +265,11 @@ drv_app_ctx_create(
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
 
-        /* alloc ctx */
+        /* setup ctx */
 
-        drv_app_alloc_fn alloc_fn = malloc;
-        drv_app_free_fn free_fn = free;
-
-        if (desc->alloc_fn) {
-                alloc_fn = desc->alloc_fn;
-                free_fn  = desc->free_fn;
-        }
-
-        struct drv_app_ctx *ctx = (struct drv_app_ctx*)alloc_fn(sizeof(*ctx));
+        struct drv_app_ctx_i *ctx = (struct drv_app_ctx_i*)out->opaque_buffer;
         *ctx = {};
 
-        //TOOD(Albert): Create GPU device if not passed in!!
-        DRV_APP_ASSERT(desc->gpu_device);
-        DRV_APP_ASSERT(desc->gpu_device->id == DRV_APP_GPU_DEVICE_DX12);
         ctx->gpu = desc->gpu_device;
 
         /* register class */
@@ -288,11 +285,6 @@ drv_app_ctx_create(
         wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
 
         if(!RegisterClass(&wc)) {
-                if(free_fn) {
-                        free_fn(ctx);
-                        ctx = 0;
-                }
-
                 assert(!"DRV_APP_RESULT_FAIL");
                 return DRV_APP_RESULT_FAIL;
         }
@@ -327,10 +319,6 @@ drv_app_ctx_create(
         );
 
         if(!ctx->hwnd) {
-                if(free_fn) {
-                        free_fn(ctx);
-                }
-
                 assert(!"DRV_APP_RESULT_FAIL");
                 return DRV_APP_RESULT_FAIL;
         }
@@ -428,18 +416,25 @@ drv_app_ctx_create(
         SetPropA(ctx->hwnd, "drive_app_ctx", ctx);
 
         /* finish up */
-
-        *out = ctx;
-
+        
         return DRV_APP_RESULT_OK;
 }
 
 
 drv_app_result
 drv_app_ctx_destroy(
-        struct drv_app_ctx **destroy)
+        struct drv_app_ctx *destroy)
 {
+        /* param checks */
+
         if(DRV_APP_PCHECKS && !destroy) {
+                assert(!"DRV_APP_RESULT_BAD_PARAMS");
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
+
+        drv_app_ctx_i *ctx = (drv_app_ctx_i*)destroy->opaque_buffer;
+
+        if(DRV_APP_PCHECKS && !ctx->hwnd) {
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
@@ -450,15 +445,17 @@ drv_app_ctx_destroy(
 
 drv_app_result
 drv_app_ctx_process(
-        struct drv_app_ctx *ctx,
+        struct drv_app_ctx *ctx_buf,
         uint64_t *out_events)
 {
         /* param checks */
 
-        if(DRV_APP_PCHECKS && !ctx) {
+        if(DRV_APP_PCHECKS && !ctx_buf) {
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
+
+        drv_app_ctx_i *ctx = (drv_app_ctx_i*)ctx_buf->opaque_buffer;
 
         /* setup */
 
@@ -524,12 +521,30 @@ struct drv_app_dx {
         ID3D12Debug *debug;
 };
 
+
 drv_app_result
 drv_app_data_get_win32(
-        struct drv_app_ctx *ctx,
+        struct drv_app_ctx *ctx_buf,
         struct drv_app_data_win32 *data)
 {
-        DRV_APP_ASSERT(data);
+        /* param checks */
+
+        if(DRV_APP_PCHECKS && !ctx_buf) {
+                assert(!"DRV_APP_RESULT_BAD_PARAMS");
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
+
+        if(DRV_APP_PCHECKS && !data) {
+                assert(!"DRV_APP_RESULT_BAD_PARAMS");
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
+
+        drv_app_ctx_i *ctx = (drv_app_ctx_i*)ctx_buf->opaque_buffer;
+
+        if(DRV_APP_PCHECKS && !ctx->hwnd) {
+                assert(!"DRV_APP_RESULT_BAD_PARAMS");
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
 
         *data = {};
         data->hwnd = ctx->hwnd;
@@ -545,16 +560,17 @@ drv_app_data_get_win32(
         return DRV_APP_RESULT_OK;
 }
 
-static void
+
+void
 wstr_ascii(WCHAR *src, char *dst) {
-        while(*src)
-        {
+        while(*src) {
                 *dst++ = (char)*src++;
         }
         *dst = 0;
 }
 
-static void
+
+void
 dx_print_adapter_info(IDXGIAdapter1 *adapter) {
         DXGI_ADAPTER_DESC1 desc;
         adapter->GetDesc1(&desc);
@@ -567,6 +583,7 @@ dx_print_adapter_info(IDXGIAdapter1 *adapter) {
         DX_LOG("IDXGIAdapter1: %s (%uMb)", name, vid_mem);
 }
 
+
 drv_app_result
 drv_app_gpu_device_create(
         drv_app_gpu_device_id id,
@@ -575,8 +592,8 @@ drv_app_gpu_device_create(
         /* param checks */
 
         if(DRV_APP_PCHECKS && id != DRV_APP_GPU_DEVICE_DX12) {
-                assert(!"DRV_APP_RESULT_FAIL");
-                return DRV_APP_RESULT_FAIL;
+                assert(!"DRV_APP_RESULT_BAD_PARAMS");
+                return DRV_APP_RESULT_BAD_PARAMS;
         }
 
         if(DRV_APP_PCHECKS && !out_device) {
@@ -584,20 +601,22 @@ drv_app_gpu_device_create(
                 return DRV_APP_RESULT_BAD_PARAMS;
         }
 
+        /* create a device */
+
         struct drv_app_gpu_device gpu = {};
-        gpu.id = id;
+        
         struct drv_app_dx *dx = (struct drv_app_dx *)gpu.api_data;
-        DRV_APP_ASSERT(sizeof(*dx) <= sizeof(gpu.api_data));
+        static_assert(sizeof(*dx) <= sizeof(gpu.api_data), "buffer too small");
 
         HRESULT ok = S_OK;
 
-#if DX_DEBUG
-        ok = D3D12GetDebugInterface(IID_PPV_ARGS(&dx->debug));
-        if(ok >= 0 && dx->debug)
-        {
-                dx->debug->EnableDebugLayer();
+        if(DX_DEBUG) {
+                ok = D3D12GetDebugInterface(IID_PPV_ARGS(&dx->debug));
+                if(ok >= 0 && dx->debug)
+                {
+                        dx->debug->EnableDebugLayer();
+                }
         }
-#endif
 
         ok = CreateDXGIFactory2(DX_DEBUG ? DXGI_CREATE_FACTORY_DEBUG : 0, IID_PPV_ARGS(&dx->factory));
         DRV_APP_ASSERT(ok >= 0 && dx->factory);
@@ -621,8 +640,7 @@ drv_app_gpu_device_create(
 
                 IDXGIAdapter1 *adapter1 = 0;
                 SIZE_T adapter_mem = 0;
-                for(UINT i = 0; i < adapter_count; ++i)
-                {
+                for(UINT i = 0; i < adapter_count; ++i) {
                         DXGI_ADAPTER_DESC1 adapter_desc;
                         adapters[i]->GetDesc1(&adapter_desc);
 
@@ -644,8 +662,7 @@ drv_app_gpu_device_create(
                 ok = adapter1->QueryInterface(IID_PPV_ARGS(&dx->adapter));
                 DRV_APP_ASSERT(ok >= 0 && dx->adapter);
 
-                for(UINT i = 0; i < adapter_count; ++i)
-                {
+                for(UINT i = 0; i < adapter_count; ++i) {
                         adapters[i]->Release(); adapters[i] = 0;
                 }
         }
@@ -656,12 +673,11 @@ drv_app_gpu_device_create(
         ok = D3D12CreateDevice(dx->adapter, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&dx->device));
         DRV_APP_ASSERT(ok >= 0 && dx->device);
 
-#if DX_DEBUG
+        if(DX_DEBUG)
         {
                 ID3D12InfoQueue *info_queue = 0;
                 ok = dx->device->QueryInterface(IID_PPV_ARGS(&info_queue));
-                if(ok >= 0 && info_queue)
-                {
+                if(ok >= 0 && info_queue) {
                         info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, TRUE);
                         info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, TRUE);
                         info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, TRUE);
@@ -669,7 +685,6 @@ drv_app_gpu_device_create(
                         info_queue->Release(); info_queue = 0;
                 }
         }
-#endif
 
         *out_device = gpu;
         return DRV_APP_RESULT_OK;
@@ -679,10 +694,16 @@ drv_app_result
 drv_app_gpu_device_destroy(
         struct drv_app_gpu_device *device)
 {
-        DRV_APP_ASSERT(device);
-        DRV_APP_ASSERT(device->id == DRV_APP_GPU_DEVICE_DX12);
-
         struct drv_app_dx *dx = (struct drv_app_dx *)device->api_data;
+
+        /* param checks */
+
+        if(DRV_APP_PCHECKS && dx) {
+                assert(!"DRV_APP_RESULT_BAD_PARAMS");
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
+
+        /* release */
 
         if(dx->device) {
                 dx->device->Release();
@@ -710,10 +731,19 @@ drv_app_gpu_device_destroy(
 
 drv_app_result
 drv_app_input_kb_data_get(
-        struct drv_app_ctx *ctx,
+        struct drv_app_ctx *ctx_buf,
         uint8_t **key_data)
 {
+        drv_app_ctx_i *ctx = (drv_app_ctx_i*)ctx_buf;
+
+        /* param checks */
+
         if(DRV_APP_PCHECKS && !ctx) {
+                assert(!"DRV_APP_RESULT_BAD_PARAMS");
+                return DRV_APP_RESULT_BAD_PARAMS;
+        }
+
+        if(DRV_APP_PCHECKS && !ctx->hwnd) {
                 assert(!"DRV_APP_RESULT_BAD_PARAMS");
                 return DRV_APP_RESULT_BAD_PARAMS;
         }

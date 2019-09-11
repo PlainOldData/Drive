@@ -32,10 +32,10 @@ unsigned long long m_fenceValue;
 int
 test_setup(struct drv_app_ctx *ctx)
 {
-        struct drv_app_data app_data = {};
-        drv_app_data_get(ctx, &app_data);
+        struct drv_app_data_win32 app_data = {};
+        drv_app_data_get_win32(ctx, &app_data);
 
-        drv_app_gpu_device(DRV_APP_GPU_DEVICE_DX12, (void**)&dev);
+        dev = app_data.dx_device;
 
         HRESULT res; 
 
